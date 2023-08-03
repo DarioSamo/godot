@@ -575,7 +575,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	}
 
 	if (use_fsr2) {
-		RD::get_singleton()->draw_command_begin_label("FSR 2.X Upscale");
+		RD::get_singleton()->draw_command_begin_label("FSR 2.2 Upscale");
 
 		for (uint32_t v = 0; v < rb->get_view_count(); v++) {
 			// FIXME: The engine does not provide a way to reset the accumulation.

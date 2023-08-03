@@ -118,26 +118,31 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 		} else {
 			float scaling_3d_scale = p_viewport->scaling_3d_scale;
 			RS::ViewportScaling3DMode scaling_3d_mode = p_viewport->scaling_3d_mode;
-			bool scaling_3d_upscaler = (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR) || (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR2);
+			bool scaling_3d_is_fsr = (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR) || (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR2);
+			bool scaling_supports_native = scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR2;
 
-			if (scaling_3d_upscaler && (scaling_3d_scale > 1.0)) {
-				// Upscalers are not designed for downsampling.
+			if (scaling_3d_is_fsr && (scaling_3d_scale > 1.0)) {
+				// FSR is not designed for downsampling.
 				// Fall back to bilinear scaling.
+				WARN_PRINT_ONCE("FSR 3D resolution scaling is not designed for downsampling. Falling back to bilinear 3D resolution scaling.");
 				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 			}
-
+			
 			bool upscaler_available = p_viewport->fsr_enabled;
-			if (scaling_3d_upscaler && !upscaler_available) {
-				// Upscaler is not actually available.
+			if (scaling_3d_is_fsr && !upscaler_available) {
+				// FSR is not actually available.
 				// Fall back to bilinear scaling.
-				WARN_PRINT_ONCE("FSR 1.0 3D resolution scaling is not available. Falling back to bilinear 3D resolution scaling.");
+				WARN_PRINT_ONCE("FSR 3D resolution scaling is not available. Falling back to bilinear 3D resolution scaling.");
 				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 			}
-
-			if (scaling_3d_scale == 1.0) {
+			
+			if (scaling_3d_scale == 1.0 && !scaling_supports_native) {
+				// Native resolution scaling is not useful except for FSR 2.
+				// Turn the scaler off entirely.
+				WARN_PRINT_ONCE("3D resolution scaling doesn't work at native resolution except for FSR 2. Turning it off.");
 				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_OFF;
 			}
-
+			
 			int width;
 			int height;
 			int render_width;
@@ -224,7 +229,7 @@ void RendererViewport::_draw_3d(Viewport *p_viewport) {
 	}
 
 	float screen_mesh_lod_threshold = p_viewport->mesh_lod_threshold / float(p_viewport->size.width);
-	bool upscaler_uses_jitter = p_viewport->scaling_3d_mode == RenderingServer::ViewportScaling3DMode::VIEWPORT_SCALING_3D_MODE_FSR2;
+	bool upscaler_uses_jitter = (p_viewport->scaling_3d_mode == RenderingServer::ViewportScaling3DMode::VIEWPORT_SCALING_3D_MODE_FSR2) && (p_viewport->scaling_3d_scale <= 1.0);
 	bool apply_jitter = upscaler_uses_jitter || p_viewport->use_taa;
 	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, apply_jitter, screen_mesh_lod_threshold, p_viewport->shadow_atlas, xr_interface, &p_viewport->render_info);
 
