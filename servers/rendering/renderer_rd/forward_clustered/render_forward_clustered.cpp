@@ -1580,17 +1580,21 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_update_vrs(rb);
 
 	RENDER_TIMESTAMP("Setup 3D Scene");
-
+	
 	// check if we need motion vectors
+	bool motion_vectors_required;
 	if (get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS) {
-		p_render_data->scene_data->calculate_motion_vectors = true;
+		motion_vectors_required = true;
 	} else if (!is_reflection_probe && rb->get_use_taa()) {
-		p_render_data->scene_data->calculate_motion_vectors = true;
+		motion_vectors_required = true;
+	} else if (rb->get_scaling_3d_mode() == RenderingServer::ViewportScaling3DMode::VIEWPORT_SCALING_3D_MODE_FSR2) {
+		motion_vectors_required = true;
 	} else {
-		p_render_data->scene_data->calculate_motion_vectors = false;
+		motion_vectors_required = false;
 	}
 
 	//p_render_data->scene_data->subsurface_scatter_width = subsurface_scatter_size;
+	p_render_data->scene_data->calculate_motion_vectors = motion_vectors_required;
 	p_render_data->scene_data->directional_light_count = 0;
 	p_render_data->scene_data->opaque_prepass_threshold = 0.99f;
 
@@ -1626,7 +1630,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	} else {
 		screen_size = rb->get_internal_size();
 
-		if (rb->get_use_taa() || get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS) {
+		if (p_render_data->scene_data->calculate_motion_vectors) {
 			color_pass_flags |= COLOR_PASS_FLAG_MOTION_VECTORS;
 		}
 

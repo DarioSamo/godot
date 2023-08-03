@@ -9330,6 +9330,9 @@ uint64_t RenderingDeviceVulkan::get_driver_resource(DriverResource p_resource, R
 
 			return uint64_t(render_pipeline->pipeline);
 		} break;
+		case DRIVER_RESOURCE_VULKAN_DRAW_COMMAND_BUFFER: {
+			return uint64_t(frames[frame].draw_command_buffer);
+		} break;
 		default: {
 			// Not supported for this driver.
 			return 0;

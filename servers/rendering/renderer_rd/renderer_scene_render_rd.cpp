@@ -349,6 +349,9 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	RID render_target = rb->get_render_target();
 	RID internal_texture = rb->get_internal_texture();
 
+	bool use_fsr = fsr && can_use_effects && rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR;
+	bool use_fsr2 = fsr2 && can_use_effects && rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR2;
+
 	if (can_use_effects && RSG::camera_attributes->camera_attributes_uses_dof(p_render_data->camera_attributes)) {
 		RENDER_TIMESTAMP("Depth of Field");
 		RD::get_singleton()->draw_command_begin_label("DOF");
@@ -553,7 +556,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		tonemap.view_count = rb->get_view_count();
 
 		RID dest_fb;
-		if (fsr && can_use_effects && rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR) {
+		bool use_intermediate_fb = use_fsr || use_fsr2;
+		if (use_intermediate_fb) {
 			// If we use FSR to upscale we need to write our result into an intermediate buffer.
 			// Note that this is cached so we only create the texture the first time.
 			RID dest_texture = rb->create_texture(SNAME("Tonemapper"), SNAME("destination"), _render_buffers_get_color_format(), RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT);
@@ -570,7 +574,32 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		RD::get_singleton()->draw_command_end_label();
 	}
 
-	if (fsr && can_use_effects && rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR) {
+	if (use_fsr2) {
+		RD::get_singleton()->draw_command_begin_label("FSR 2.X Upscale");
+
+		for (uint32_t v = 0; v < rb->get_view_count(); v++) {
+			// FIXME: The engine does not provide a way to reset the accumulation.
+			real_t fov = p_render_data->scene_data->cam_projection.get_fov();
+			real_t aspect = p_render_data->scene_data->cam_projection.get_aspect();
+			real_t fovy = p_render_data->scene_data->cam_projection.get_fovy(fov, aspect);
+			Vector2 jitter = p_render_data->scene_data->taa_jitter * Vector2(rb->get_internal_size()) * 0.5f;
+			RendererRD::FSR2::Parameters params;
+			params.render_buffers = rb;
+			params.color = rb->get_texture_slice(SNAME("Tonemapper"), SNAME("destination"), v, 0);
+			params.depth = rb->get_depth_texture(v);
+			params.velocity = rb->get_velocity_buffer(false, v);
+			params.output = texture_storage->render_target_get_rd_texture_slice(render_target, v);
+			params.z_near = p_render_data->scene_data->z_near;
+			params.z_far = p_render_data->scene_data->z_far;
+			params.fovy = fovy;
+			params.jitter = jitter;
+			params.delta_time = float(time_step);
+			params.reset_accumulation = false;
+			fsr2->upscale(params);
+		}
+
+		RD::get_singleton()->draw_command_end_label();
+	} else if (use_fsr) {
 		RD::get_singleton()->draw_command_begin_label("FSR 1.0 Upscale");
 
 		for (uint32_t v = 0; v < rb->get_view_count(); v++) {
@@ -582,6 +611,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 
 		RD::get_singleton()->draw_command_end_label();
 	}
+
 
 	texture_storage->render_target_disable_clear_request(render_target);
 }
@@ -1322,6 +1352,7 @@ void RendererSceneRenderRD::init() {
 	}
 	if (can_use_storage) {
 		fsr = memnew(RendererRD::FSR);
+		fsr2 = memnew(RendererRD::FSR2);
 	}
 }
 
@@ -1350,6 +1381,9 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 	}
 	if (fsr) {
 		memdelete(fsr);
+	}
+	if (fsr2) {
+		memdelete(fsr2);
 	}
 
 	if (sky.sky_scene_state.uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(sky.sky_scene_state.uniform_set)) {
