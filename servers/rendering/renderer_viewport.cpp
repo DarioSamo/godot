@@ -118,28 +118,33 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 		} else {
 			float scaling_3d_scale = p_viewport->scaling_3d_scale;
 			RS::ViewportScaling3DMode scaling_3d_mode = p_viewport->scaling_3d_mode;
+			bool scaling_3d_is_fsr = (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR) || (scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR2);
 
-			if ((scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR) && (scaling_3d_scale > 1.0)) {
+			if (scaling_3d_is_fsr && (scaling_3d_scale > 1.0)) {
 				// FSR is not designed for downsampling.
 				// Fall back to bilinear scaling.
+				WARN_PRINT_ONCE("FSR 3D resolution scaling is not designed for downsampling. Falling back to bilinear 3D resolution scaling.");
 				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 			}
 
-			if ((scaling_3d_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR) && !p_viewport->fsr_enabled) {
+			bool upscaler_available = p_viewport->fsr_enabled;
+			if (scaling_3d_is_fsr && !upscaler_available) {
 				// FSR is not actually available.
 				// Fall back to bilinear scaling.
-				WARN_PRINT_ONCE("FSR 1.0 3D resolution scaling is not available. Falling back to bilinear 3D resolution scaling.");
+				WARN_PRINT_ONCE("FSR 3D resolution scaling is not available. Falling back to bilinear 3D resolution scaling.");
 				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_BILINEAR;
-			}
-
-			if (scaling_3d_scale == 1.0) {
-				scaling_3d_mode = RS::VIEWPORT_SCALING_3D_MODE_OFF;
 			}
 
 			int width;
 			int height;
 			int render_width;
 			int render_height;
+			uint32_t jitter_phase_count = 0;
+
+			if (p_viewport->use_taa) {
+				// Default jitter count for TAA.
+				jitter_phase_count = 16;
+			}
 
 			switch (scaling_3d_mode) {
 				case RS::VIEWPORT_SCALING_3D_MODE_BILINEAR:
@@ -151,10 +156,14 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 					render_height = height;
 					break;
 				case RS::VIEWPORT_SCALING_3D_MODE_FSR:
+				case RS::VIEWPORT_SCALING_3D_MODE_FSR2:
 					width = p_viewport->size.width;
 					height = p_viewport->size.height;
 					render_width = MAX(width * scaling_3d_scale, 1.0); // width / (width * scaling)
 					render_height = MAX(height * scaling_3d_scale, 1.0);
+
+					// Implementation has been copied from ffxFsr2GetJitterPhaseCount.
+					jitter_phase_count = uint32_t(8.0f * pow(float(width) / render_width, 2.0f));
 					break;
 				case RS::VIEWPORT_SCALING_3D_MODE_OFF:
 					width = p_viewport->size.width;
@@ -175,6 +184,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			}
 
 			p_viewport->internal_size = Size2(render_width, render_height);
+			p_viewport->jitter_phase_count = jitter_phase_count;
 
 			// At resolution scales lower than 1.0, use negative texture mipmap bias
 			// to compensate for the loss of sharpness.
@@ -221,7 +231,7 @@ void RendererViewport::_draw_3d(Viewport *p_viewport) {
 	}
 
 	float screen_mesh_lod_threshold = p_viewport->mesh_lod_threshold / float(p_viewport->size.width);
-	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, p_viewport->use_taa, screen_mesh_lod_threshold, p_viewport->shadow_atlas, xr_interface, &p_viewport->render_info);
+	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, p_viewport->jitter_phase_count, screen_mesh_lod_threshold, p_viewport->shadow_atlas, xr_interface, &p_viewport->render_info);
 
 	RENDER_TIMESTAMP("< Render 3D Scene");
 }
@@ -825,8 +835,20 @@ void RendererViewport::viewport_set_use_xr(RID p_viewport, bool p_use_xr) {
 void RendererViewport::viewport_set_scaling_3d_mode(RID p_viewport, RS::ViewportScaling3DMode p_mode) {
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_COND(!viewport);
+	ERR_FAIL_COND_EDMSG(p_mode == RS::VIEWPORT_SCALING_3D_MODE_FSR2 && OS::get_singleton()->get_current_rendering_method() != "forward_plus", "FSR2 is only available when using the Forward+ renderer.");
 
+	if (viewport->scaling_3d_mode == p_mode) {
+		return;
+	}
+
+	bool motion_vectors_before = _viewport_requires_motion_vectors(viewport);
 	viewport->scaling_3d_mode = p_mode;
+
+	bool motion_vectors_after = _viewport_requires_motion_vectors(viewport);
+	if (motion_vectors_before != motion_vectors_after) {
+		num_viewports_with_motion_vectors += motion_vectors_after ? 1 : -1;
+	}
+
 	_configure_3d_render_buffers(viewport);
 }
 
@@ -886,6 +908,10 @@ void RendererViewport::_viewport_set_size(Viewport *p_viewport, int p_width, int
 
 		p_viewport->occlusion_buffer_dirty = true;
 	}
+}
+
+bool RendererViewport::_viewport_requires_motion_vectors(Viewport *p_viewport) {
+	return p_viewport->use_taa || p_viewport->scaling_3d_mode == RenderingServer::VIEWPORT_SCALING_3D_MODE_FSR2;
 }
 
 void RendererViewport::viewport_set_active(RID p_viewport, bool p_active) {
@@ -1193,8 +1219,15 @@ void RendererViewport::viewport_set_use_taa(RID p_viewport, bool p_use_taa) {
 	if (viewport->use_taa == p_use_taa) {
 		return;
 	}
+
+	bool motion_vectors_before = _viewport_requires_motion_vectors(viewport);
 	viewport->use_taa = p_use_taa;
-	num_viewports_with_motion_vectors += p_use_taa ? 1 : -1;
+
+	bool motion_vectors_after = _viewport_requires_motion_vectors(viewport);
+	if (motion_vectors_before != motion_vectors_after) {
+		num_viewports_with_motion_vectors += motion_vectors_after ? 1 : -1;
+	}
+
 	_configure_3d_render_buffers(viewport);
 }
 
@@ -1379,7 +1412,7 @@ bool RendererViewport::free(RID p_rid) {
 			RendererSceneOcclusionCull::get_singleton()->remove_buffer(p_rid);
 		}
 
-		if (viewport->use_taa) {
+		if (_viewport_requires_motion_vectors(viewport)) {
 			num_viewports_with_motion_vectors--;
 		}
 
