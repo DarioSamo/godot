@@ -35,8 +35,9 @@
 
 using namespace RendererRD;
 
-#if defined(MINGW_ENABLED) || defined(_MSC_VER)
-#define wcsncpy wcsncpy_s
+#ifndef _MSC_VER
+#include <wchar.h>
+#define wcscpy_s wcscpy
 #endif
 
 RD::TextureType ffx_resource_type_to_rd_texture_type(FfxResourceType t) {
@@ -331,7 +332,7 @@ FfxErrorCode create_pipeline_rd(FfxFsr2Interface *backend_interface, FfxFsr2Pass
 		// Change the binding for motion vectors in this particular pass if low resolution MVs are used.
 		if (low_resolution_mvs) {
 			FfxResourceBinding &binding = out_pipeline->srvResourceBindings[2];
-			wcsncpy(binding.name, L"r_dilated_motion_vectors", sizeof(binding.name) / sizeof(wchar_t));
+			wcscpy_s(binding.name, L"r_dilated_motion_vectors");
 		}
 	}
 
@@ -493,7 +494,7 @@ FfxResource get_resource_rd(RID *rid, const wchar_t *name) {
 		return res;
 	}
 
-	wcsncpy(res.name, name, sizeof(res.name) / sizeof(wchar_t));
+	wcscpy_s(res.name, name);
 
 	RD::TextureFormat texture_format = RD::get_singleton()->texture_get_format(*rid);
 	res.description.type = rd_texture_type_to_ffx_resource_type(texture_format.texture_type);
