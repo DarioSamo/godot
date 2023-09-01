@@ -304,8 +304,11 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		const GeometryInstanceSurfaceDataCache *surf = p_params->elements[i];
 		const RenderElementInfo &element_info = p_params->element_info[i];
 
-		if ((p_pass_mode == PASS_MODE_COLOR && !(p_color_pass_flags & COLOR_PASS_FLAG_TRANSPARENT)) && !(surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE)) {
-			continue; // Objects with "Depth-prepass" transparency are included in both render lists, but should only be rendered in the transparent pass
+		bool exclude_motion = !(p_color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS) && surf->owner->using_motion_vectors;
+		bool exclude_transparent = !(p_color_pass_flags & COLOR_PASS_FLAG_TRANSPARENT) && !(surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE);
+		if (p_pass_mode == PASS_MODE_COLOR && (exclude_transparent || exclude_motion)) {
+			// Exclude surfaces that are repeated in the dynamic and transparent render lists but are included in this render list for the depth pre-pass.
+			continue;
 		}
 
 		if (surf->owner->instance_count == 0) {
@@ -796,6 +799,7 @@ _FORCE_INLINE_ static uint32_t _indices_to_primitives(RS::PrimitiveType p_primit
 }
 void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, uint32_t p_color_pass_flags = 0, bool p_using_sdfgi, bool p_using_opaque_gi, bool p_append) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	uint64_t frame = RSG::rasterizer->get_frame_number();
 
 	if (p_render_list == RENDER_LIST_OPAQUE) {
 		scene_state.used_sss = false;
@@ -816,7 +820,9 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 	if (!p_append) {
 		rl->clear();
 		if (p_render_list == RENDER_LIST_OPAQUE) {
-			render_list[RENDER_LIST_ALPHA].clear(); //opaque fills alpha too
+			// Opaque fills motion and alpha lists.
+			render_list[RENDER_LIST_MOTION].clear();
+			render_list[RENDER_LIST_ALPHA].clear();
 		}
 	}
 
@@ -936,6 +942,8 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		}
 		inst->flags_cache = flags;
 
+		inst->using_motion_vectors = (inst->prev_transform_change_frame == frame) || inst->mesh_instance.is_valid();
+
 		GeometryInstanceSurfaceDataCache *surf = inst->surface_caches;
 
 		while (surf) {
@@ -1008,7 +1016,12 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 
 				if (!force_alpha && (surf->flags & (GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE))) {
 					rl->add_element(surf);
+
+					if (inst->using_motion_vectors) {
+						render_list[RENDER_LIST_MOTION].add_element(surf);
+					}
 				}
+
 				if (force_alpha || (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA)) {
 					render_list[RENDER_LIST_ALPHA].add_element(surf);
 					if (uses_gi) {
@@ -1694,8 +1707,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, color_pass_flags, using_sdfgi, using_sdfgi || using_voxelgi);
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
+	render_list[RENDER_LIST_MOTION].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
-	_fill_instance_data(RENDER_LIST_OPAQUE, p_render_data->render_info ? p_render_data->render_info->info[RS::VIEWPORT_RENDER_INFO_TYPE_VISIBLE] : (int *)nullptr);
+
+	int *render_info = p_render_data->render_info ? p_render_data->render_info->info[RS::VIEWPORT_RENDER_INFO_TYPE_VISIBLE] : (int *)nullptr;
+	_fill_instance_data(RENDER_LIST_OPAQUE, render_info);
+	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA);
 
 	RD::get_singleton()->draw_command_end_label();
@@ -1924,11 +1941,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool can_continue_color = !scene_state.used_screen_texture && !using_ssr && !using_sss;
 	bool can_continue_depth = !(scene_state.used_depth_texture || scene_state.used_normal_texture) && !using_ssr && !using_sss;
+	bool will_continue_color = (can_continue_color || draw_sky || draw_sky_fog_only || debug_voxelgis || debug_sdfgi_probes);
+	bool will_continue_depth = (can_continue_depth || draw_sky || draw_sky_fog_only || debug_voxelgis || debug_sdfgi_probes);
 
 	{
-		bool will_continue_color = (can_continue_color || draw_sky || draw_sky_fog_only || debug_voxelgis || debug_sdfgi_probes);
-		bool will_continue_depth = (can_continue_depth || draw_sky || draw_sky_fog_only || debug_voxelgis || debug_sdfgi_probes);
-
 		Vector<Color> c;
 		{
 			Color cc = clear_color.srgb_to_linear();
@@ -1939,25 +1955,47 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			if (rb_data.is_valid()) {
 				c.push_back(Color(0, 0, 0, 0)); // Separate specular
-
-				// Motion vectors need to be cleared to an invalid value when the effects support deriving the information from the camera movement and the depth buffer.
-				c.push_back(using_derived_mvs ? Color(-1, -1, 0, 0) : Color(0, 0, 0, 0));
+				c.push_back(Color(0, 0, 0, 0)); // Motion vector, unused
 			}
 		}
 
-		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count);
-		_render_list_with_threads(&render_list_params, color_framebuffer, keep_color ? RD::INITIAL_ACTION_KEEP : RD::INITIAL_ACTION_CLEAR, will_continue_color ? RD::FINAL_ACTION_CONTINUE : RD::FINAL_ACTION_READ, depth_pre_pass ? (continue_depth ? RD::INITIAL_ACTION_CONTINUE : RD::INITIAL_ACTION_KEEP) : RD::INITIAL_ACTION_CLEAR, will_continue_depth ? RD::FINAL_ACTION_CONTINUE : RD::FINAL_ACTION_READ, c, 1.0, 0);
-		if (will_continue_color && using_separate_specular) {
-			// close the specular framebuffer, as it's no longer used
-			RD::get_singleton()->draw_list_begin(rb_data->get_specular_only_fb(), RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_READ, RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_CONTINUE);
+		uint32_t opaque_color_pass_flags = color_pass_flags & ~COLOR_PASS_FLAG_MOTION_VECTORS;
+		RID opaque_framebuffer = rb_data.is_valid() ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
+		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, opaque_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count);
+		_render_list_with_threads(&render_list_params, opaque_framebuffer, keep_color ? RD::INITIAL_ACTION_KEEP : RD::INITIAL_ACTION_CLEAR, RD::FINAL_ACTION_CONTINUE, depth_pre_pass ? (continue_depth ? RD::INITIAL_ACTION_CONTINUE : RD::INITIAL_ACTION_KEEP) : RD::INITIAL_ACTION_CLEAR, RD::FINAL_ACTION_CONTINUE, c, 1.0, 0);
+	}
+
+	RD::get_singleton()->draw_command_end_label();
+
+	RD::get_singleton()->draw_command_begin_label("Render Dynamic Pass");
+
+	RENDER_TIMESTAMP("Render Dynamic Pass");
+
+	rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, radiance_texture, true);
+	{
+		if (rb_data.is_valid()) {
+			// Clear the motion vectors framebuffer.
+			// Motion vectors need to be cleared to an invalid value when the effects support deriving the information from the camera movement and the depth buffer.
+			Vector<Color> motion_vector_clear_colors;
+			motion_vector_clear_colors.push_back(using_derived_mvs ? Color(-1, -1, 0, 0) : Color(0, 0, 0, 0));
+			RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::INITIAL_ACTION_CLEAR, RD::FINAL_ACTION_CONTINUE, RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_CONTINUE, motion_vector_clear_colors);
 			RD::get_singleton()->draw_list_end();
 		}
 
-		if (will_continue_color && using_reactive) {
-			// Close the motion vectors framebuffer if the transparent pass prefers to use the reactive mask instead.
-			RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_READ, RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_CONTINUE);
-			RD::get_singleton()->draw_list_end();
-		}
+		RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count);
+		_render_list_with_threads(&render_list_params, color_framebuffer, RD::INITIAL_ACTION_CONTINUE, will_continue_color ? RD::FINAL_ACTION_CONTINUE : RD::FINAL_ACTION_READ, RD::INITIAL_ACTION_CONTINUE, will_continue_depth ? RD::FINAL_ACTION_CONTINUE : RD::FINAL_ACTION_READ);
+	}
+
+	if (will_continue_color && using_separate_specular) {
+		// close the specular framebuffer, as it's no longer used
+		RD::get_singleton()->draw_list_begin(rb_data->get_specular_only_fb(), RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_READ, RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_CONTINUE);
+		RD::get_singleton()->draw_list_end();
+	}
+
+	if (will_continue_color && using_reactive) {
+		// Close the motion vectors framebuffer if the transparent pass prefers to use the reactive mask instead.
+		RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_READ, RD::INITIAL_ACTION_CONTINUE, RD::FINAL_ACTION_CONTINUE);
+		RD::get_singleton()->draw_list_end();
 	}
 
 	RD::get_singleton()->draw_command_end_label();

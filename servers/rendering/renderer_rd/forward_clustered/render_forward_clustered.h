@@ -85,6 +85,7 @@ class RenderForwardClustered : public RendererSceneRenderRD {
 
 	enum RenderListType {
 		RENDER_LIST_OPAQUE, //used for opaque objects
+		RENDER_LIST_MOTION, //used for opaque objects with motion
 		RENDER_LIST_ALPHA, //used for transparent objects
 		RENDER_LIST_SECONDARY, //used for shadows and other objects
 		RENDER_LIST_MAX
@@ -463,6 +464,7 @@ class RenderForwardClustered : public RendererSceneRenderRD {
 		bool can_sdfgi = false;
 		bool using_projectors = false;
 		bool using_softshadows = false;
+		bool using_motion_vectors = false;
 
 		//used during setup
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
