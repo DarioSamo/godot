@@ -45,7 +45,9 @@
 #define RB_SCOPE_VRS SNAME("VRS")
 
 #define RB_TEXTURE SNAME("texture")
-#define RB_TEX_COLOR SNAME("color")
+#define RB_TEX_COLOR_0 SNAME("color_0")
+#define RB_TEX_COLOR_1 SNAME("color_1")
+#define RB_TEX_COLOR_2 SNAME("color_2")
 #define RB_TEX_COLOR_MSAA SNAME("color_msaa")
 #define RB_TEX_COLOR_UPSCALED SNAME("color_upscaled")
 #define RB_TEX_DEPTH_0 SNAME("depth_0")
@@ -164,8 +166,8 @@ private:
 	// Data buffers
 	mutable HashMap<StringName, Ref<RenderBufferCustomDataRD>> data_buffers;
 
-	// Swap textures.
-	bool swap_internal_buffer = false;
+	// Tracking for TAA resources.
+	uint32_t color_buffer_index = false;
 	bool swap_depth_buffer = false;
 	bool swap_velocity_buffer = false;
 
@@ -232,14 +234,22 @@ public:
 
 	// For our internal textures we provide some easy access methods.
 
+	void ensure_color();
+
 	_FORCE_INLINE_ bool has_internal_texture() const {
-		return has_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR);
+		return has_texture(RB_SCOPE_BUFFERS, _get_color_name(color_buffer_index));
+	}
+	_FORCE_INLINE_ bool has_previous_internal_texture() const {
+		return has_texture(RB_SCOPE_BUFFERS, _get_previous_color_name(color_buffer_index));
 	}
 	_FORCE_INLINE_ RID get_internal_texture() const {
-		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR);
+		return get_texture(RB_SCOPE_BUFFERS, _get_color_name(color_buffer_index));
 	}
 	_FORCE_INLINE_ RID get_internal_texture(const uint32_t p_layer) {
-		return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_COLOR, p_layer, 0);
+		return get_texture_slice(RB_SCOPE_BUFFERS, _get_color_name(color_buffer_index), p_layer, 0);
+	}
+	_FORCE_INLINE_ RID get_previous_internal_texture(const uint32_t p_layer) {
+		return get_texture_slice(RB_SCOPE_BUFFERS, _get_previous_color_name(color_buffer_index), p_layer, 0);
 	}
 	_FORCE_INLINE_ RID get_internal_texture_reactive(const uint32_t p_layer) {
 		RD::TextureView alpha_only_view;
@@ -247,13 +257,16 @@ public:
 		alpha_only_view.swizzle_g = RD::TEXTURE_SWIZZLE_A;
 		alpha_only_view.swizzle_b = RD::TEXTURE_SWIZZLE_A;
 		alpha_only_view.swizzle_a = RD::TEXTURE_SWIZZLE_A;
-		return get_texture_slice_view(RB_SCOPE_BUFFERS, RB_TEX_COLOR, p_layer, 0, 1, 1, alpha_only_view);
+		return get_texture_slice_view(RB_SCOPE_BUFFERS, _get_color_name(color_buffer_index), p_layer, 0, 1, 1, alpha_only_view);
 	}
 	_FORCE_INLINE_ RID get_color_msaa() const {
 		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA);
 	}
 	_FORCE_INLINE_ RID get_color_msaa(uint32_t p_layer) {
 		return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA, p_layer, 0);
+	}
+	_FORCE_INLINE_ void advance_color_buffer() {
+		color_buffer_index = (color_buffer_index + 1) % 3;
 	}
 
 	void ensure_depth();
@@ -326,6 +339,27 @@ private:
 		}
 	}
 
+	const StringName &_get_color_name(uint32_t index) const {
+		switch (index) {
+			case 0:
+				return RB_TEX_COLOR_0;
+			case 1:
+				return RB_TEX_COLOR_1;
+			case 2:
+				return RB_TEX_COLOR_2;
+			default:
+				return SNAME("");
+		}
+	}
+
+	const StringName &_get_previous_color_name(uint32_t index) const {
+		if (index > 0) {
+			return _get_color_name(index - 1);
+		} else {
+			return _get_color_name(2);
+		}
+	}
+
 	RID _get_depth_texture() {
 		if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED && has_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA)) {
 			return get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA);
@@ -346,7 +380,7 @@ private:
 		}
 	}
 
-	const StringName &_get_depth_name(bool swap) {
+	const StringName &_get_depth_name(bool swap) const {
 		if (swap) {
 			return RB_TEX_DEPTH_1;
 		} else {
@@ -374,7 +408,7 @@ private:
 		}
 	}
 
-	const StringName &_get_velocity_name(bool swap) {
+	const StringName &_get_velocity_name(bool swap) const {
 		if (swap) {
 			return RB_TEX_VELOCITY_1;
 		} else {

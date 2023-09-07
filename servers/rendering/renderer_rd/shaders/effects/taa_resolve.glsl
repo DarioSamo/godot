@@ -122,15 +122,15 @@ vec2 get_previous_velocity(ivec2 pixel_pos, float pixel_depth) {
 }
 
 #ifdef USE_SUBGROUPS
-shared vec3 tile_color[kTileDimension][kTileDimension];
+shared vec4 tile_color[kTileDimension][kTileDimension];
 shared float tile_depth[kTileDimension][kTileDimension];
 
-vec3 load_color(uvec2 group_thread_id) {
+vec4 load_color(uvec2 group_thread_id) {
 	group_thread_id += kBorderSize;
 	return tile_color[group_thread_id.x][group_thread_id.y];
 }
 
-void store_color(uvec2 group_thread_id, vec3 color) {
+void store_color(uvec2 group_thread_id, vec4 color) {
 	tile_color[group_thread_id.x][group_thread_id.y] = color;
 }
 
@@ -147,7 +147,7 @@ void store_color_depth(uvec2 group_thread_id, ivec2 thread_id) {
 	// out of bounds clamp
 	thread_id = clamp(thread_id, ivec2(0, 0), ivec2(params.resolution) - ivec2(1, 1));
 
-	store_color(group_thread_id, imageLoad(color_buffer, thread_id).rgb);
+	store_color(group_thread_id, imageLoad(color_buffer, thread_id));
 	store_depth(group_thread_id, get_depth(thread_id));
 }
 
@@ -171,8 +171,8 @@ void populate_group_shared_memory(uvec2 group_id, uint group_index) {
 	barrier();
 }
 #else
-vec3 load_color(uvec2 screen_pos) {
-	return imageLoad(color_buffer, ivec2(screen_pos)).rgb;
+vec4 load_color(uvec2 screen_pos) {
+	return imageLoad(color_buffer, ivec2(screen_pos));
 }
 
 float load_depth(uvec2 screen_pos) {
@@ -300,15 +300,15 @@ vec3 clip_aabb(vec3 aabb_min, vec3 aabb_max, vec3 p, vec3 q) {
 // Clip history to the neighbourhood of the current sample
 vec3 clip_history_3x3(uvec2 group_pos, vec3 color_history, vec2 velocity_closest) {
 	// Sample a 3x3 neighbourhood
-	vec3 s1 = load_color(group_pos + kOffsets3x3[0]);
-	vec3 s2 = load_color(group_pos + kOffsets3x3[1]);
-	vec3 s3 = load_color(group_pos + kOffsets3x3[2]);
-	vec3 s4 = load_color(group_pos + kOffsets3x3[3]);
-	vec3 s5 = load_color(group_pos + kOffsets3x3[4]);
-	vec3 s6 = load_color(group_pos + kOffsets3x3[5]);
-	vec3 s7 = load_color(group_pos + kOffsets3x3[6]);
-	vec3 s8 = load_color(group_pos + kOffsets3x3[7]);
-	vec3 s9 = load_color(group_pos + kOffsets3x3[8]);
+	vec3 s1 = load_color(group_pos + kOffsets3x3[0]).rgb;
+	vec3 s2 = load_color(group_pos + kOffsets3x3[1]).rgb;
+	vec3 s3 = load_color(group_pos + kOffsets3x3[2]).rgb;
+	vec3 s4 = load_color(group_pos + kOffsets3x3[3]).rgb;
+	vec3 s5 = load_color(group_pos + kOffsets3x3[4]).rgb;
+	vec3 s6 = load_color(group_pos + kOffsets3x3[5]).rgb;
+	vec3 s7 = load_color(group_pos + kOffsets3x3[6]).rgb;
+	vec3 s8 = load_color(group_pos + kOffsets3x3[7]).rgb;
+	vec3 s9 = load_color(group_pos + kOffsets3x3[8]).rgb;
 
 	// Compute min and max (with an adaptive box size, which greatly reduces ghosting)
 	vec3 color_avg = (s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9) * RPC_9;
@@ -358,7 +358,7 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 	vec2 uv_reprojected = uv + velocity;
 
 	// Get input color
-	vec3 color_input = load_color(pos_group);
+	vec4 color_input = load_color(pos_group);
 
 	// Get history color (catmull-rom reduces a lot of the blurring that you get under motion)
 	vec3 color_history = sample_catmull_rom_9(tex_history, uv_reprojected, params.resolution).rgb;
@@ -377,8 +377,11 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		// Increase blend factor when there is disocclusion (fixes a lot of the remaining ghosting).
 		float factor_disocclusion = get_factor_disocclusion(uv_reprojected, velocity);
 
+		// Increase blend factor for pixels with high reactivity.
+		float factor_reactivity = color_input.a;
+
 		// Add to the blend factor
-		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion, 0.0, 1.0);
+		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion + factor_reactivity, 0.0, 1.0);
 	}
 
 	// Resolve
@@ -386,10 +389,10 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 	{
 		// Tonemap
 		color_history = reinhard(color_history);
-		color_input = reinhard(color_input);
+		color_input.rgb = reinhard(color_input.rgb);
 
 		// Reduce flickering
-		float lum_color = luminance(color_input);
+		float lum_color = luminance(color_input.rgb);
 		float lum_history = luminance(color_history);
 		float diff = abs(lum_color - lum_history) / max(lum_color, max(lum_history, 1.001));
 		diff = 1.0 - diff;
@@ -397,7 +400,7 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		blend_factor = mix(0.0, blend_factor, diff);
 
 		// Lerp/blend
-		color_resolved = mix(color_history, color_input, blend_factor);
+		color_resolved = mix(color_history, color_input.rgb, blend_factor);
 
 		// Inverse tonemap
 		color_resolved = reinhard_inverse(color_resolved);

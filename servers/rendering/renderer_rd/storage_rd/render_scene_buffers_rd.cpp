@@ -150,19 +150,9 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	// cleanout any old buffers we had.
 	cleanup();
 
-	// create our 3D render buffers
-	{
-		// Create our color buffer(s)
-		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | (can_be_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0) | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
-		usage_bits |= RD::TEXTURE_USAGE_INPUT_ATTACHMENT_BIT; // only needed when using subpasses in the mobile renderer
-
-		// our internal texture should have MSAA support if applicable
-		if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED) {
-			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
-		}
-
-		create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR, base_data_format, usage_bits);
-	}
+	// Color and depth are always required.
+	ensure_color();
+	ensure_depth();
 
 	// Create our MSAA buffers
 	if (msaa_3d == RS::VIEWPORT_MSAA_DISABLED) {
@@ -352,6 +342,7 @@ RID RenderSceneBuffersRD::create_texture_view(const StringName &p_context, const
 RID RenderSceneBuffersRD::get_texture(const StringName &p_context, const StringName &p_texture_name) const {
 	NTKey key(p_context, p_texture_name);
 
+	CRASH_COND(!named_textures.has(key));
 	ERR_FAIL_COND_V(!named_textures.has(key), RID());
 
 	return named_textures[key].texture;
@@ -556,6 +547,24 @@ Ref<RenderBufferCustomDataRD> RenderSceneBuffersRD::get_custom_data(const String
 	Ref<RenderBufferCustomDataRD> ret = data_buffers[p_name];
 
 	return ret;
+}
+
+// Color texture.
+
+void RenderSceneBuffersRD::ensure_color() {
+	if (!has_internal_texture()) {
+		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | (can_be_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0) | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+
+		// Only needed when using subpasses in the mobile renderer.
+		usage_bits |= RD::TEXTURE_USAGE_INPUT_ATTACHMENT_BIT;
+
+		// Add MSAA support if applicable.
+		if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED) {
+			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		}
+
+		create_texture(RB_SCOPE_BUFFERS, _get_color_name(color_buffer_index), base_data_format, usage_bits);
+	}
 }
 
 // Depth texture

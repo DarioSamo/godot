@@ -91,42 +91,34 @@ void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_
 }
 
 void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, const Projection &p_reprojection) {
-	CopyEffects *copy_effects = CopyEffects::get_singleton();
+	if (!p_render_buffers->has_previous_internal_texture()) {
+		return;
+	}
 
+	CopyEffects *copy_effects = CopyEffects::get_singleton();
 	uint32_t view_count = p_render_buffers->get_view_count();
 	Size2i internal_size = p_render_buffers->get_internal_size();
 	Size2i target_size = p_render_buffers->get_target_size();
 
-	bool just_allocated = false;
-	if (!p_render_buffers->has_texture(SNAME("taa"), SNAME("history"))) {
-		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-
-		p_render_buffers->create_texture(SNAME("taa"), SNAME("history"), p_format, usage_bits);
-		p_render_buffers->create_texture(SNAME("taa"), SNAME("temp"), p_format, usage_bits);
-
-		just_allocated = true;
-	}
-
 	RD::get_singleton()->draw_command_begin_label("TAA");
 
 	for (uint32_t v = 0; v < view_count; v++) {
-		RID internal_texture = p_render_buffers->get_internal_texture(v);
-		RID taa_history = p_render_buffers->get_texture_slice(SNAME("taa"), SNAME("history"), v, 0);
+		RID current_color = p_render_buffers->get_internal_texture(v);
+		RID previous_color = p_render_buffers->get_previous_internal_texture(v);
+		RID velocity_buffer = p_render_buffers->get_velocity_buffer(false, v);
+		RID prev_velocity_buffer = p_render_buffers->get_previous_velocity_buffer(v);
+		RID depth_texture = p_render_buffers->get_depth_texture(v);
+		RID prev_depth_texture = p_render_buffers->get_previous_depth_texture(v);
 
-		if (!just_allocated) {
-			RID velocity_buffer = p_render_buffers->get_velocity_buffer(false, v);
-			RID prev_velocity_buffer = p_render_buffers->get_previous_velocity_buffer(v);
-			RID depth_texture = p_render_buffers->get_depth_texture(v);
-			RID prev_depth_texture = p_render_buffers->get_previous_depth_texture(v);
-			RID taa_temp = p_render_buffers->get_texture_slice(SNAME("taa"), SNAME("temp"), v, 0);
-			resolve(internal_texture, taa_temp, depth_texture, prev_depth_texture, velocity_buffer, prev_velocity_buffer, taa_history, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_reprojection, last_reprojection);
-			copy_effects->copy_to_rect(taa_temp, internal_texture, Rect2(0, 0, internal_size.x, internal_size.y));
-		}
+		// Advance to the next color texture and use it as the output of the TAA resolve.
+		p_render_buffers->advance_color_buffer();
+		p_render_buffers->ensure_color();
+		RID next_color = p_render_buffers->get_internal_texture(v);
 
-		copy_effects->copy_to_rect(internal_texture, taa_history, Rect2(0, 0, internal_size.x, internal_size.y));
+		resolve(current_color, next_color, depth_texture, prev_depth_texture, velocity_buffer, prev_velocity_buffer, previous_color, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_reprojection, last_reprojection);
 	}
 
-	last_reprojection = p_reprojection;
-
 	RD::get_singleton()->draw_command_end_label();
+
+	last_reprojection = p_reprojection;
 }

@@ -173,6 +173,7 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_only_fb(
 
 RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(uint32_t p_color_pass_flags) {
 	ERR_FAIL_NULL_V(render_buffers, RID());
+
 	bool use_msaa = render_buffers->get_msaa_3d() != RS::VIEWPORT_MSAA_DISABLED;
 
 	int v_count = (p_color_pass_flags & COLOR_PASS_FLAG_MULTIVIEW) ? render_buffers->get_view_count() : 1;
@@ -190,7 +191,6 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 		velocity_buffer = render_buffers->get_velocity_buffer(use_msaa);
 	}
 
-	render_buffers->ensure_depth();
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
 
 	if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
@@ -1624,6 +1624,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_debug_mvs = get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS;
 	bool using_taa = rb->get_use_taa();
 	bool using_fsr2 = rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR2;
+	bool advance_color_buffer = using_taa;
 	bool swap_depth_buffer = using_taa;
 	bool swap_velocity_buffer = using_taa;
 
@@ -2248,8 +2249,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			sdfgi->debug_draw(p_render_data->scene_data->view_count, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, size.x, size.y, rb->get_render_target(), source_texture, view_rids);
 		}
 
+		if (advance_color_buffer) {
+			rb->advance_color_buffer();
+			rb->ensure_color();
+		}
+
 		if (swap_depth_buffer) {
 			rb->toggle_swap_depth_buffer();
+			rb->ensure_depth();
 		}
 
 		if (swap_velocity_buffer) {
