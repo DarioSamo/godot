@@ -64,6 +64,7 @@ constants;
 
 layout(push_constant, std430) uniform Params {
 	vec2 resolution;
+	vec2 jitter;
 	float disocclusion_threshold; // 0.1 / max(params.resolution.x, params.resolution.y
 	float disocclusion_scale;
 }
@@ -217,7 +218,7 @@ void get_closest_pixel_velocity_3x3(in uvec2 group_pos, uvec2 group_top_left, ou
 							  HISTORY SAMPLING
 ------------------------------------------------------------------------------*/
 
-vec3 sample_catmull_rom_9(sampler2D stex, vec2 uv, vec2 resolution) {
+vec4 sample_catmull_rom_9(sampler2D stex, vec2 uv, vec2 resolution) {
 	// Source: https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
 	// License: https://gist.github.com/TheRealMJP/bc503b0b87b643d3505d41eab8b332ae
 
@@ -253,19 +254,19 @@ vec3 sample_catmull_rom_9(sampler2D stex, vec2 uv, vec2 resolution) {
 	texPos3 /= resolution;
 	texPos12 /= resolution;
 
-	vec3 result = vec3(0.0f, 0.0f, 0.0f);
+	vec4 result = vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
-	result += textureLod(stex, vec2(texPos0.x, texPos0.y), 0.0).xyz * w0.x * w0.y;
-	result += textureLod(stex, vec2(texPos12.x, texPos0.y), 0.0).xyz * w12.x * w0.y;
-	result += textureLod(stex, vec2(texPos3.x, texPos0.y), 0.0).xyz * w3.x * w0.y;
+	result += textureLod(stex, vec2(texPos0.x, texPos0.y), 0.0) * w0.x * w0.y;
+	result += textureLod(stex, vec2(texPos12.x, texPos0.y), 0.0) * w12.x * w0.y;
+	result += textureLod(stex, vec2(texPos3.x, texPos0.y), 0.0) * w3.x * w0.y;
 
-	result += textureLod(stex, vec2(texPos0.x, texPos12.y), 0.0).xyz * w0.x * w12.y;
-	result += textureLod(stex, vec2(texPos12.x, texPos12.y), 0.0).xyz * w12.x * w12.y;
-	result += textureLod(stex, vec2(texPos3.x, texPos12.y), 0.0).xyz * w3.x * w12.y;
+	result += textureLod(stex, vec2(texPos0.x, texPos12.y), 0.0) * w0.x * w12.y;
+	result += textureLod(stex, vec2(texPos12.x, texPos12.y), 0.0) * w12.x * w12.y;
+	result += textureLod(stex, vec2(texPos3.x, texPos12.y), 0.0) * w3.x * w12.y;
 
-	result += textureLod(stex, vec2(texPos0.x, texPos3.y), 0.0).xyz * w0.x * w3.y;
-	result += textureLod(stex, vec2(texPos12.x, texPos3.y), 0.0).xyz * w12.x * w3.y;
-	result += textureLod(stex, vec2(texPos3.x, texPos3.y), 0.0).xyz * w3.x * w3.y;
+	result += textureLod(stex, vec2(texPos0.x, texPos3.y), 0.0) * w0.x * w3.y;
+	result += textureLod(stex, vec2(texPos12.x, texPos3.y), 0.0) * w12.x * w3.y;
+	result += textureLod(stex, vec2(texPos3.x, texPos3.y), 0.0) * w3.x * w3.y;
 
 	return max(result, 0.0f);
 }
@@ -275,10 +276,10 @@ vec3 sample_catmull_rom_9(sampler2D stex, vec2 uv, vec2 resolution) {
 ------------------------------------------------------------------------------*/
 
 // Based on "Temporal Reprojection Anti-Aliasing" - https://github.com/playdeadgames/temporal
-vec3 clip_aabb(vec3 aabb_min, vec3 aabb_max, vec3 p, vec3 q) {
-	vec3 r = q - p;
-	vec3 rmax = (aabb_max - p.xyz);
-	vec3 rmin = (aabb_min - p.xyz);
+vec4 clip_aabb(vec4 aabb_min, vec4 aabb_max, vec4 p, vec4 q) {
+	vec4 r = q - p;
+	vec4 rmax = (aabb_max - p);
+	vec4 rmin = (aabb_min - p);
 
 	if (r.x > rmax.x + FLT_MIN)
 		r *= (rmax.x / r.x);
@@ -286,6 +287,8 @@ vec3 clip_aabb(vec3 aabb_min, vec3 aabb_max, vec3 p, vec3 q) {
 		r *= (rmax.y / r.y);
 	if (r.z > rmax.z + FLT_MIN)
 		r *= (rmax.z / r.z);
+	if (r.w > rmax.w + FLT_MIN)
+		r *= (rmax.w / r.w);
 
 	if (r.x < rmin.x - FLT_MIN)
 		r *= (rmin.x / r.x);
@@ -293,33 +296,35 @@ vec3 clip_aabb(vec3 aabb_min, vec3 aabb_max, vec3 p, vec3 q) {
 		r *= (rmin.y / r.y);
 	if (r.z < rmin.z - FLT_MIN)
 		r *= (rmin.z / r.z);
+	if (r.w < rmin.w - FLT_MIN)
+		r *= (rmin.w / r.w);
 
 	return p + r;
 }
 
 // Clip history to the neighbourhood of the current sample
-vec3 clip_history_3x3(uvec2 group_pos, vec3 color_history, vec2 velocity_closest) {
+vec4 clip_history_3x3(uvec2 group_pos, vec4 color_history, vec2 velocity_closest) {
 	// Sample a 3x3 neighbourhood
-	vec3 s1 = load_color(group_pos + kOffsets3x3[0]).rgb;
-	vec3 s2 = load_color(group_pos + kOffsets3x3[1]).rgb;
-	vec3 s3 = load_color(group_pos + kOffsets3x3[2]).rgb;
-	vec3 s4 = load_color(group_pos + kOffsets3x3[3]).rgb;
-	vec3 s5 = load_color(group_pos + kOffsets3x3[4]).rgb;
-	vec3 s6 = load_color(group_pos + kOffsets3x3[5]).rgb;
-	vec3 s7 = load_color(group_pos + kOffsets3x3[6]).rgb;
-	vec3 s8 = load_color(group_pos + kOffsets3x3[7]).rgb;
-	vec3 s9 = load_color(group_pos + kOffsets3x3[8]).rgb;
+	vec4 s1 = load_color(group_pos + kOffsets3x3[0]);
+	vec4 s2 = load_color(group_pos + kOffsets3x3[1]);
+	vec4 s3 = load_color(group_pos + kOffsets3x3[2]);
+	vec4 s4 = load_color(group_pos + kOffsets3x3[3]);
+	vec4 s5 = load_color(group_pos + kOffsets3x3[4]);
+	vec4 s6 = load_color(group_pos + kOffsets3x3[5]);
+	vec4 s7 = load_color(group_pos + kOffsets3x3[6]);
+	vec4 s8 = load_color(group_pos + kOffsets3x3[7]);
+	vec4 s9 = load_color(group_pos + kOffsets3x3[8]);
 
 	// Compute min and max (with an adaptive box size, which greatly reduces ghosting)
-	vec3 color_avg = (s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9) * RPC_9;
-	vec3 color_avg2 = ((s1 * s1) + (s2 * s2) + (s3 * s3) + (s4 * s4) + (s5 * s5) + (s6 * s6) + (s7 * s7) + (s8 * s8) + (s9 * s9)) * RPC_9;
+	vec4 color_avg = (s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9) * RPC_9;
+	vec4 color_avg2 = ((s1 * s1) + (s2 * s2) + (s3 * s3) + (s4 * s4) + (s5 * s5) + (s6 * s6) + (s7 * s7) + (s8 * s8) + (s9 * s9)) * RPC_9;
 	float box_size = mix(0.0f, 2.5f, smoothstep(0.02f, 0.0f, length(velocity_closest)));
-	vec3 dev = sqrt(abs(color_avg2 - (color_avg * color_avg))) * box_size;
-	vec3 color_min = color_avg - dev;
-	vec3 color_max = color_avg + dev;
+	vec4 dev = sqrt(abs(color_avg2 - (color_avg * color_avg))) * box_size;
+	vec4 color_min = color_avg - dev;
+	vec4 color_max = color_avg + dev;
 
 	// Variance clipping
-	vec3 color = clip_aabb(color_min, color_max, clamp(color_avg, color_min, color_max), color_history);
+	vec4 color = clip_aabb(color_min, color_max, clamp(color_avg, color_min, color_max), color_history);
 
 	// Clamp to prevent NaNs
 	color = clamp(color, FLT_MIN, FLT_MAX);
@@ -347,7 +352,7 @@ float get_factor_disocclusion(vec2 uv_reprojected, vec2 velocity) {
 	return clamp(disocclusion * params.disocclusion_scale, 0.0, 1.0);
 }
 
-vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_screen, vec2 uv, sampler2D tex_history) {
+vec4 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_screen, vec2 uv, sampler2D tex_history) {
 	// Get input depth
 	float depth_input = load_depth(pos_group);
 
@@ -361,7 +366,7 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 	vec4 color_input = load_color(pos_group);
 
 	// Get history color (catmull-rom reduces a lot of the blurring that you get under motion)
-	vec3 color_history = sample_catmull_rom_9(tex_history, uv_reprojected, params.resolution).rgb;
+	vec4 color_history = sample_catmull_rom_9(tex_history, uv_reprojected, params.resolution);
 
 	// Clip history to the neighbourhood of the current sample (fixes a lot of the ghosting).
 	vec2 velocity_closest = vec2(0.0); // This is best done by using the velocity with the closest depth.
@@ -378,32 +383,32 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		float factor_disocclusion = get_factor_disocclusion(uv_reprojected, velocity);
 
 		// Increase blend factor for pixels with high reactivity.
-		float factor_reactivity = color_input.a;
+		float factor_reactivity = clamp(color_input.a - color_history.a, 0.0f, 0.9f);
 
 		// Add to the blend factor
 		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion + factor_reactivity, 0.0, 1.0);
 	}
 
 	// Resolve
-	vec3 color_resolved = vec3(0.0);
+	vec4 color_resolved = vec4(0.0);
 	{
 		// Tonemap
-		color_history = reinhard(color_history);
+		color_history.rgb = reinhard(color_history.rgb);
 		color_input.rgb = reinhard(color_input.rgb);
 
 		// Reduce flickering
 		float lum_color = luminance(color_input.rgb);
-		float lum_history = luminance(color_history);
+		float lum_history = luminance(color_history.rgb);
 		float diff = abs(lum_color - lum_history) / max(lum_color, max(lum_history, 1.001));
 		diff = 1.0 - diff;
 		diff = diff * diff;
 		blend_factor = mix(0.0, blend_factor, diff);
 
 		// Lerp/blend
-		color_resolved = mix(color_history, color_input.rgb, blend_factor);
+		color_resolved = mix(color_history, color_input, blend_factor);
 
 		// Inverse tonemap
-		color_resolved = reinhard_inverse(color_resolved);
+		color_resolved.rgb = reinhard_inverse(color_resolved.rgb);
 	}
 
 	return color_resolved;
@@ -429,6 +434,6 @@ void main() {
 	const uvec2 pos_screen = gl_GlobalInvocationID.xy;
 	const vec2 uv = (gl_GlobalInvocationID.xy + 0.5f) / params.resolution;
 
-	vec3 result = temporal_antialiasing(pos_group_top_left, pos_group, pos_screen, uv, history_buffer);
-	imageStore(output_buffer, ivec2(gl_GlobalInvocationID.xy), vec4(result, 1.0));
+	vec4 result = temporal_antialiasing(pos_group_top_left, pos_group, pos_screen, uv, history_buffer);
+	imageStore(output_buffer, ivec2(gl_GlobalInvocationID.xy), result);
 }

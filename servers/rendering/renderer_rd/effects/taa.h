@@ -45,14 +45,15 @@ public:
 	TAA();
 	~TAA();
 
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, const Projection &p_reprojection);
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, const Projection &p_reprojection, Vector2 p_jitter);
 
 private:
 	struct TAAResolvePushConstant {
-		float resolution_width;
-		float resolution_height;
+		float resolution[2];
+		float jitter[2];
 		float disocclusion_threshold;
 		float disocclusion_scale;
+		float pad[2];
 	};
 
 	struct TAAConstants {
@@ -66,7 +67,7 @@ private:
 	RID constants_buffer;
 	Projection last_reprojection;
 
-	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_velocity, RID p_prev_velocity, RID p_history, Size2 p_resolution, float p_z_near, float p_z_far, const Projection &p_reprojection, const Projection &p_prev_reprojection);
+	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_velocity, RID p_prev_velocity, RID p_history, Size2 p_resolution, float p_z_near, float p_z_far, const Projection &p_reprojection, const Projection &p_prev_reprojection, Vector2 p_jitter);
 };
 
 } // namespace RendererRD

@@ -2183,6 +2183,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
 		const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
 		Projection reprojection = prev_proj.flipped_y() * prev_transform.affine_inverse() * cur_transform * cur_proj.flipped_y().inverse();
+		Vector2 jitter = p_render_data->scene_data->taa_jitter * Vector2(rb->get_internal_size()) * 0.5f;
 
 		if (using_fsr2) {
 			rb->ensure_upscaled();
@@ -2198,7 +2199,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				real_t fov = p_render_data->scene_data->cam_projection.get_fov();
 				real_t aspect = p_render_data->scene_data->cam_projection.get_aspect();
 				real_t fovy = p_render_data->scene_data->cam_projection.get_fovy(fov, aspect);
-				Vector2 jitter = p_render_data->scene_data->taa_jitter * Vector2(rb->get_internal_size()) * 0.5f;
 				RendererRD::FSR2Effect::Parameters params;
 				params.context = rb_data->get_fsr2_context();
 				params.internal_size = rb->get_internal_size();
@@ -2220,7 +2220,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			}
 		} else if (using_taa) {
 			RENDER_TIMESTAMP("TAA");
-			taa->process(rb, _render_buffers_get_color_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far, reprojection);
+			taa->process(rb, _render_buffers_get_color_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far, reprojection, jitter);
 		}
 	}
 

@@ -50,7 +50,7 @@ TAA::~TAA() {
 	taa_shader.version_free(shader_version);
 }
 
-void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_velocity, RID p_prev_velocity, RID p_history, Size2 p_resolution, float p_z_near, float p_z_far, const Projection &p_reprojection, const Projection &p_prev_reprojection) {
+void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_velocity, RID p_prev_velocity, RID p_history, Size2 p_resolution, float p_z_near, float p_z_far, const Projection &p_reprojection, const Projection &p_prev_reprojection, Vector2 p_jitter) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -62,8 +62,10 @@ void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	TAAResolvePushConstant push_constant;
-	push_constant.resolution_width = p_resolution.width;
-	push_constant.resolution_height = p_resolution.height;
+	push_constant.resolution[0] = p_resolution.width;
+	push_constant.resolution[1] = p_resolution.height;
+	push_constant.jitter[0] = p_jitter.x;
+	push_constant.jitter[1] = p_jitter.y;
 	push_constant.disocclusion_threshold = 0.025f;
 	push_constant.disocclusion_scale = 10.0f;
 
@@ -90,15 +92,13 @@ void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_prev_depth, RID p_
 	RD::get_singleton()->compute_list_end();
 }
 
-void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, const Projection &p_reprojection) {
+void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, const Projection &p_reprojection, Vector2 p_jitter) {
 	if (!p_render_buffers->has_previous_internal_texture()) {
 		return;
 	}
 
-	CopyEffects *copy_effects = CopyEffects::get_singleton();
 	uint32_t view_count = p_render_buffers->get_view_count();
 	Size2i internal_size = p_render_buffers->get_internal_size();
-	Size2i target_size = p_render_buffers->get_target_size();
 
 	RD::get_singleton()->draw_command_begin_label("TAA");
 
@@ -115,7 +115,7 @@ void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_f
 		p_render_buffers->ensure_color();
 		RID next_color = p_render_buffers->get_internal_texture(v);
 
-		resolve(current_color, next_color, depth_texture, prev_depth_texture, velocity_buffer, prev_velocity_buffer, previous_color, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_reprojection, last_reprojection);
+		resolve(current_color, next_color, depth_texture, prev_depth_texture, velocity_buffer, prev_velocity_buffer, previous_color, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_reprojection, last_reprojection, p_jitter);
 	}
 
 	RD::get_singleton()->draw_command_end_label();
