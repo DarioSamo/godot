@@ -48,9 +48,11 @@
 #define RB_TEX_COLOR SNAME("color")
 #define RB_TEX_COLOR_MSAA SNAME("color_msaa")
 #define RB_TEX_COLOR_UPSCALED SNAME("color_upscaled")
-#define RB_TEX_DEPTH SNAME("depth")
+#define RB_TEX_DEPTH_0 SNAME("depth_0")
+#define RB_TEX_DEPTH_1 SNAME("depth_1")
 #define RB_TEX_DEPTH_MSAA SNAME("depth_msaa")
-#define RB_TEX_VELOCITY SNAME("velocity")
+#define RB_TEX_VELOCITY_0 SNAME("velocity_0")
+#define RB_TEX_VELOCITY_1 SNAME("velocity_1")
 #define RB_TEX_VELOCITY_MSAA SNAME("velocity_msaa")
 
 #define RB_TEX_BLUR_0 SNAME("blur_0")
@@ -162,6 +164,11 @@ private:
 	// Data buffers
 	mutable HashMap<StringName, Ref<RenderBufferCustomDataRD>> data_buffers;
 
+	// Swap textures.
+	bool swap_internal_buffer = false;
+	bool swap_depth_buffer = false;
+	bool swap_velocity_buffer = false;
+
 protected:
 	static void _bind_methods();
 
@@ -249,9 +256,12 @@ public:
 		return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA, p_layer, 0);
 	}
 
+	void ensure_depth();
 	bool has_depth_texture();
 	RID get_depth_texture();
 	RID get_depth_texture(const uint32_t p_layer);
+	RID get_previous_depth_texture(const uint32_t p_layer);
+	void toggle_swap_depth_buffer();
 
 	RID get_depth_msaa() const {
 		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA);
@@ -282,6 +292,8 @@ public:
 	bool has_velocity_buffer(bool p_has_msaa);
 	RID get_velocity_buffer(bool p_get_msaa);
 	RID get_velocity_buffer(bool p_get_msaa, uint32_t p_layer);
+	RID get_previous_velocity_buffer(uint32_t p_layer);
+	void toggle_swap_velocity_buffer();
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Our classDB doesn't support calling our normal exposed functions
@@ -334,6 +346,14 @@ private:
 		}
 	}
 
+	const StringName &_get_depth_name(bool swap) {
+		if (swap) {
+			return RB_TEX_DEPTH_1;
+		} else {
+			return RB_TEX_DEPTH_0;
+		}
+	}
+
 	RID _get_velocity_texture() {
 		if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED && has_velocity_buffer(true)) {
 			return get_velocity_buffer(true);
@@ -351,6 +371,14 @@ private:
 			return get_velocity_buffer(false, p_layer);
 		} else {
 			return RID();
+		}
+	}
+
+	const StringName &_get_velocity_name(bool swap) {
+		if (swap) {
+			return RB_TEX_VELOCITY_1;
+		} else {
+			return RB_TEX_VELOCITY_0;
 		}
 	}
 

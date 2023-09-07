@@ -29,6 +29,8 @@
 
 #VERSION_DEFINES
 
+#include "motion_vector_inc.glsl"
+
 // Based on Spartan Engine's TAA implementation (without TAA upscale).
 // <https://github.com/PanosK92/SpartanEngine/blob/a8338d0609b85dc32f3732a5c27fb4463816a3b9/Data/shaders/temporal_antialiasing.hlsl>
 
@@ -48,10 +50,17 @@ layout(local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1) i
 
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_buffer;
 layout(set = 0, binding = 1) uniform sampler2D depth_buffer;
-layout(rg16f, set = 0, binding = 2) uniform restrict readonly image2D velocity_buffer;
-layout(rg16f, set = 0, binding = 3) uniform restrict readonly image2D last_velocity_buffer;
-layout(set = 0, binding = 4) uniform sampler2D history_buffer;
-layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_buffer;
+layout(set = 0, binding = 2) uniform sampler2D last_depth_buffer;
+layout(rg16f, set = 0, binding = 3) uniform restrict readonly image2D velocity_buffer;
+layout(rg16f, set = 0, binding = 4) uniform restrict readonly image2D last_velocity_buffer;
+layout(set = 0, binding = 5) uniform sampler2D history_buffer;
+layout(rgba16f, set = 0, binding = 6) uniform restrict writeonly image2D output_buffer;
+
+layout(set = 0, binding = 7) uniform Constants {
+	mat4 reprojection_matrix;
+	mat4 last_reprojection_matrix;
+}
+constants;
 
 layout(push_constant, std430) uniform Params {
 	vec2 resolution;
@@ -90,6 +99,26 @@ vec3 reinhard_inverse(vec3 sdr) {
 
 float get_depth(ivec2 thread_id) {
 	return texelFetch(depth_buffer, thread_id, 0).r;
+}
+
+float get_previous_depth(ivec2 thread_id) {
+	return texelFetch(last_depth_buffer, thread_id, 0).r;
+}
+
+vec2 get_velocity_function(ivec2 pixel_pos, float pixel_depth, vec2 pixel_velocity, mat4 reprojection_matrix) {
+	if (is_motion_vector_invalid(pixel_velocity)) {
+		return derive_motion_vector(pixel_pos / params.resolution, pixel_depth, reprojection_matrix);
+	} else {
+		return pixel_velocity;
+	}
+}
+
+vec2 get_velocity(ivec2 pixel_pos, float pixel_depth) {
+	return get_velocity_function(pixel_pos, pixel_depth, imageLoad(velocity_buffer, pixel_pos).xy, constants.reprojection_matrix);
+}
+
+vec2 get_previous_velocity(ivec2 pixel_pos, float pixel_depth) {
+	return get_velocity_function(pixel_pos, pixel_depth, imageLoad(last_velocity_buffer, pixel_pos).xy, constants.last_reprojection_matrix);
 }
 
 #ifdef USE_SUBGROUPS
@@ -180,7 +209,8 @@ void get_closest_pixel_velocity_3x3(in uvec2 group_pos, uvec2 group_top_left, ou
 	depth_test_min(group_pos + kOffsets3x3[8], min_depth, min_pos);
 
 	// Velocity out
-	velocity = imageLoad(velocity_buffer, ivec2(group_top_left + min_pos)).xy;
+	ivec2 pixel_pos = ivec2(group_top_left + min_pos);
+	velocity = get_velocity(pixel_pos, min_depth);
 }
 
 /*------------------------------------------------------------------------------
@@ -308,7 +338,9 @@ float luminance(vec3 color) {
 }
 
 float get_factor_disocclusion(vec2 uv_reprojected, vec2 velocity) {
-	vec2 velocity_previous = imageLoad(last_velocity_buffer, ivec2(uv_reprojected * params.resolution)).xy;
+	ivec2 pixel_pos = ivec2(uv_reprojected * params.resolution);
+	float depth_previous = get_previous_depth(pixel_pos);
+	vec2 velocity_previous = get_previous_velocity(pixel_pos, depth_previous);
 	vec2 velocity_texels = velocity * params.resolution;
 	vec2 prev_velocity_texels = velocity_previous * params.resolution;
 	float disocclusion = length(prev_velocity_texels - velocity_texels) - params.disocclusion_threshold;
@@ -316,8 +348,11 @@ float get_factor_disocclusion(vec2 uv_reprojected, vec2 velocity) {
 }
 
 vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_screen, vec2 uv, sampler2D tex_history) {
+	// Get input depth
+	float depth_input = load_depth(pos_group);
+
 	// Get the velocity of the current pixel
-	vec2 velocity = imageLoad(velocity_buffer, ivec2(pos_screen)).xy;
+	vec2 velocity = get_velocity(ivec2(pos_screen), depth_input);
 
 	// Get reprojected uv
 	vec2 uv_reprojected = uv + velocity;

@@ -190,6 +190,7 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 		velocity_buffer = render_buffers->get_velocity_buffer(use_msaa);
 	}
 
+	render_buffers->ensure_depth();
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
 
 	if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
@@ -244,7 +245,7 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_specular_only_
 RID RenderForwardClustered::RenderBufferDataForwardClustered::get_velocity_only_fb() {
 	bool use_msaa = render_buffers->get_msaa_3d() != RS::VIEWPORT_MSAA_DISABLED;
 
-	RID velocity = render_buffers->get_texture(RB_SCOPE_BUFFERS, use_msaa ? RB_TEX_VELOCITY_MSAA : RB_TEX_VELOCITY);
+	RID velocity = render_buffers->get_velocity_buffer(use_msaa);
 
 	return FramebufferCacheRD::get_singleton()->get_cache_multiview(render_buffers->get_view_count(), velocity);
 }
@@ -1623,6 +1624,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_debug_mvs = get_debug_draw_mode() == RS::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS;
 	bool using_taa = rb->get_use_taa();
 	bool using_fsr2 = rb->get_scaling_3d_mode() == RS::VIEWPORT_SCALING_3D_MODE_FSR2;
+	bool swap_depth_buffer = using_taa;
+	bool swap_velocity_buffer = using_taa;
 
 	// check if we need motion vectors
 	bool motion_vectors_required;
@@ -1655,7 +1658,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_voxelgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
-	bool using_motion_pass = rb_data.is_valid() && using_fsr2;
+	bool using_motion_pass = rb_data.is_valid() && motion_vectors_required;
 
 	if (is_reflection_probe) {
 		uint32_t resolution = light_storage->reflection_probe_instance_get_resolution(p_render_data->reflection_probe);
@@ -2174,6 +2177,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	RD::get_singleton()->draw_command_end_label();
 
 	if (rb_data.is_valid() && (using_fsr2 || using_taa)) {
+		const Projection &prev_proj = p_render_data->scene_data->prev_cam_projection;
+		const Projection &cur_proj = p_render_data->scene_data->cam_projection;
+		const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
+		const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
+		Projection reprojection = prev_proj.flipped_y() * prev_transform.affine_inverse() * cur_transform * cur_proj.flipped_y().inverse();
+
 		if (using_fsr2) {
 			rb->ensure_upscaled();
 			rb_data->ensure_fsr2(fsr2_effect);
@@ -2205,18 +2214,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.jitter = jitter;
 				params.delta_time = float(time_step);
 				params.reset_accumulation = false; // FIXME: The engine does not provide a way to reset the accumulation.
-
-				const Projection &prev_proj = p_render_data->scene_data->prev_cam_projection;
-				const Projection &cur_proj = p_render_data->scene_data->cam_projection;
-				const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
-				const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
-				params.reprojection = prev_proj.flipped_y() * prev_transform.affine_inverse() * cur_transform * cur_proj.flipped_y().inverse();
-
+				params.reprojection = reprojection;
 				fsr2_effect->upscale(params);
 			}
 		} else if (using_taa) {
 			RENDER_TIMESTAMP("TAA");
-			taa->process(rb, _render_buffers_get_color_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far);
+			taa->process(rb, _render_buffers_get_color_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far, reprojection);
 		}
 	}
 
@@ -2243,6 +2246,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			}
 
 			sdfgi->debug_draw(p_render_data->scene_data->view_count, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, size.x, size.y, rb->get_render_target(), source_texture, view_rids);
+		}
+
+		if (swap_depth_buffer) {
+			rb->toggle_swap_depth_buffer();
+		}
+
+		if (swap_velocity_buffer) {
+			rb->toggle_swap_velocity_buffer();
 		}
 	}
 }

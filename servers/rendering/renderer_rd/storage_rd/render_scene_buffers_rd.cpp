@@ -164,24 +164,6 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 		create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR, base_data_format, usage_bits);
 	}
 
-	// Create our depth buffer
-	{
-		// TODO Lazy create this in case we've got an external depth buffer
-
-		RD::DataFormat format;
-		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT;
-
-		if (msaa_3d == RS::VIEWPORT_MSAA_DISABLED) {
-			usage_bits |= RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-			format = RD::get_singleton()->texture_is_format_supported_for_usage(RD::DATA_FORMAT_D24_UNORM_S8_UINT, usage_bits) ? RD::DATA_FORMAT_D24_UNORM_S8_UINT : RD::DATA_FORMAT_D32_SFLOAT_S8_UINT;
-		} else {
-			format = RD::DATA_FORMAT_R32_SFLOAT;
-			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | (can_be_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0);
-		}
-
-		create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, format, usage_bits);
-	}
-
 	// Create our MSAA buffers
 	if (msaa_3d == RS::VIEWPORT_MSAA_DISABLED) {
 		texture_samples = RD::TEXTURE_SAMPLES_1;
@@ -578,6 +560,23 @@ Ref<RenderBufferCustomDataRD> RenderSceneBuffersRD::get_custom_data(const String
 
 // Depth texture
 
+void RenderSceneBuffersRD::ensure_depth() {
+	if (!has_depth_texture()) {
+		RD::DataFormat format;
+		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT;
+
+		if (msaa_3d == RS::VIEWPORT_MSAA_DISABLED) {
+			usage_bits |= RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			format = RD::get_singleton()->texture_is_format_supported_for_usage(RD::DATA_FORMAT_D24_UNORM_S8_UINT, usage_bits) ? RD::DATA_FORMAT_D24_UNORM_S8_UINT : RD::DATA_FORMAT_D32_SFLOAT_S8_UINT;
+		} else {
+			format = RD::DATA_FORMAT_R32_SFLOAT;
+			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | (can_be_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0);
+		}
+
+		create_texture(RB_SCOPE_BUFFERS, _get_depth_name(swap_depth_buffer), format, usage_bits);
+	}
+}
+
 bool RenderSceneBuffersRD::has_depth_texture() {
 	if (render_target.is_null()) {
 		// not applicable when there is no render target (likely this is for a reflection probe)
@@ -589,7 +588,7 @@ bool RenderSceneBuffersRD::has_depth_texture() {
 	if (depth.is_valid()) {
 		return true;
 	} else {
-		return has_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH);
+		return has_texture(RB_SCOPE_BUFFERS, _get_depth_name(swap_depth_buffer));
 	}
 }
 
@@ -604,7 +603,7 @@ RID RenderSceneBuffersRD::get_depth_texture() {
 	if (depth.is_valid()) {
 		return depth;
 	} else {
-		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH);
+		return get_texture(RB_SCOPE_BUFFERS, _get_depth_name(swap_depth_buffer));
 	}
 }
 
@@ -614,8 +613,16 @@ RID RenderSceneBuffersRD::get_depth_texture(const uint32_t p_layer) {
 	if (depth_slice.is_valid()) {
 		return depth_slice;
 	} else {
-		return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, p_layer, 0);
+		return get_texture_slice(RB_SCOPE_BUFFERS, _get_depth_name(swap_depth_buffer), p_layer, 0);
 	}
+}
+
+RID RenderSceneBuffersRD::get_previous_depth_texture(const uint32_t p_layer) {
+	return get_texture_slice(RB_SCOPE_BUFFERS, _get_depth_name(!swap_depth_buffer), p_layer, 0);
+}
+
+void RenderSceneBuffersRD::toggle_swap_depth_buffer() {
+	swap_depth_buffer = !swap_depth_buffer;
 }
 
 // Upscaled texture.
@@ -631,17 +638,19 @@ void RenderSceneBuffersRD::ensure_upscaled() {
 // Velocity texture.
 
 void RenderSceneBuffersRD::ensure_velocity() {
-	if (!has_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY)) {
-		uint32_t usage_bits = RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+	uint32_t usage_bits = RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 
-		if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED) {
-			uint32_t msaa_usage_bits = usage_bits | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
-			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	if (msaa_3d != RS::VIEWPORT_MSAA_DISABLED) {
+		uint32_t msaa_usage_bits = usage_bits | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+		usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 
+		if (!has_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY_MSAA)) {
 			create_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY_MSAA, RD::DATA_FORMAT_R16G16_SFLOAT, msaa_usage_bits, texture_samples);
 		}
+	}
 
-		create_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY, RD::DATA_FORMAT_R16G16_SFLOAT, usage_bits);
+	if (!has_texture(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer))) {
+		create_texture(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer), RD::DATA_FORMAT_R16G16_SFLOAT, usage_bits);
 	}
 }
 
@@ -654,7 +663,7 @@ bool RenderSceneBuffersRD::has_velocity_buffer(bool p_has_msaa) {
 		if (velocity.is_valid()) {
 			return true;
 		} else {
-			return has_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY);
+			return has_texture(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer));
 		}
 	}
 }
@@ -671,10 +680,10 @@ RID RenderSceneBuffersRD::get_velocity_buffer(bool p_get_msaa) {
 		RID velocity = texture_storage->render_target_get_override_velocity(render_target);
 		if (velocity.is_valid()) {
 			return velocity;
-		} else if (!has_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY)) {
+		} else if (!has_texture(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer))) {
 			return RID();
 		} else {
-			return get_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY);
+			return get_texture(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer));
 		}
 	}
 }
@@ -688,7 +697,15 @@ RID RenderSceneBuffersRD::get_velocity_buffer(bool p_get_msaa, uint32_t p_layer)
 		if (velocity_slice.is_valid()) {
 			return velocity_slice;
 		} else {
-			return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY, p_layer, 0);
+			return get_texture_slice(RB_SCOPE_BUFFERS, _get_velocity_name(swap_velocity_buffer), p_layer, 0);
 		}
 	}
+}
+
+RID RenderSceneBuffersRD::get_previous_velocity_buffer(uint32_t p_layer) {
+	return get_texture_slice(RB_SCOPE_BUFFERS, _get_velocity_name(!swap_velocity_buffer), p_layer, 0);
+}
+
+void RenderSceneBuffersRD::toggle_swap_velocity_buffer() {
+	swap_velocity_buffer = !swap_velocity_buffer;
 }
