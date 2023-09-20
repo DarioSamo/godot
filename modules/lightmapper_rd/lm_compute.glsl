@@ -37,8 +37,7 @@ layout(set = 1, binding = 0, std430) restrict buffer LightProbeData {
 light_probes;
 
 layout(set = 1, binding = 1) uniform texture2DArray source_light;
-layout(set = 1, binding = 2) uniform texture2DArray source_direct_light; //also need the direct light, which was omitted
-layout(set = 1, binding = 3) uniform texture2D environment;
+layout(set = 1, binding = 2) uniform texture2D environment;
 #endif
 
 #ifdef MODE_UNOCCLUDE
@@ -59,11 +58,7 @@ layout(rgba16f, set = 1, binding = 4) uniform restrict image2DArray accum_light;
 #endif
 
 #ifdef MODE_BOUNCE_LIGHT
-layout(rgba32f, set = 1, binding = 5) uniform restrict image2DArray bounce_accum;
-layout(set = 1, binding = 6) uniform texture2D environment;
-#endif
-#ifdef MODE_DIRECT_LIGHT
-layout(rgba32f, set = 1, binding = 5) uniform restrict writeonly image2DArray primary_dynamic;
+layout(set = 1, binding = 5) uniform texture2D environment;
 #endif
 
 #if defined(MODE_DILATE) || defined(MODE_DENOISE)
@@ -85,24 +80,13 @@ denoise_params;
 #endif
 
 layout(push_constant, std430) uniform Params {
-	ivec2 atlas_size; // x used for light probe mode total probes
+	uint atlas_slice;
 	uint ray_count;
+	uint ray_from;
 	uint ray_to;
 
-	vec3 world_size;
-	float bias;
-
-	vec3 to_cell_offset;
-	uint ray_from;
-
-	vec3 to_cell_size;
-	uint light_count;
-
-	int grid_size;
-	int atlas_slice;
 	ivec2 region_ofs;
-
-	mat3x4 env_transform;
+	uint probe_count;
 }
 params;
 
@@ -127,7 +111,7 @@ bool ray_hits_triangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, ve
 	r_barycentric.x = 1.0 - (r_barycentric.z + r_barycentric.y);
 	r_distance = dot(triangle_normal, e2);
 
-	return (r_distance > params.bias) && (r_distance < max_dist) && all(greaterThanEqual(r_barycentric, vec3(0.0)));
+	return (r_distance > bake_params.bias) && (r_distance < max_dist) && all(greaterThanEqual(r_barycentric, vec3(0.0)));
 }
 
 const uint RAY_MISS = 0;
@@ -155,20 +139,20 @@ uint trace_ray(vec3 p_from, vec3 p_to
 
 	/* cell coords */
 
-	vec3 from_cell = (p_from - params.to_cell_offset) * params.to_cell_size;
-	vec3 to_cell = (p_to - params.to_cell_offset) * params.to_cell_size;
+	vec3 from_cell = (p_from - bake_params.to_cell_offset) * bake_params.to_cell_size;
+	vec3 to_cell = (p_to - bake_params.to_cell_offset) * bake_params.to_cell_size;
 
 	//prepare DDA
 	vec3 rel_cell = to_cell - from_cell;
 	ivec3 icell = ivec3(from_cell);
 	ivec3 iendcell = ivec3(to_cell);
 	vec3 dir_cell = normalize(rel_cell);
-	vec3 delta = min(abs(1.0 / dir_cell), params.grid_size); // use params.grid_size as max to prevent infinity values
+	vec3 delta = min(abs(1.0 / dir_cell), bake_params.grid_size); // Use bake_params.grid_size as max to prevent infinity values.
 	ivec3 step = ivec3(sign(rel_cell));
 	vec3 side = (sign(rel_cell) * (vec3(icell) - from_cell) + (sign(rel_cell) * 0.5) + 0.5) * delta;
 
 	uint iters = 0;
-	while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(params.grid_size))) && iters < 1000) {
+	while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(bake_params.grid_size))) && iters < 1000) {
 		uvec2 cell_data = texelFetch(usampler3D(grid, linear_sampler), icell, 0).xy;
 		if (cell_data.x > 0) { //triangles here
 			uint hit = RAY_MISS;
@@ -209,7 +193,7 @@ uint trace_ray(vec3 p_from, vec3 p_to
 					if (!backface) {
 						// the case of meshes having both a front and back face in the same plane is more common than
 						// expected, so if this is a front-face, bias it closer to the ray origin, so it always wins over the back-face
-						distance = max(params.bias, distance - params.bias);
+						distance = max(bake_params.bias, distance - bake_params.bias);
 					}
 
 					if (distance < best_distance) {
@@ -269,20 +253,96 @@ float randomize(inout uint value) {
 const float PI = 3.14159265f;
 
 // http://www.realtimerendering.com/raytracinggems/unofficial_RayTracingGems_v1.4.pdf (chapter 15)
-vec3 generate_hemisphere_uniform_direction(inout uint noise) {
-	float noise1 = randomize(noise);
-	float noise2 = randomize(noise) * 2.0 * PI;
-
-	float factor = sqrt(1 - (noise1 * noise1));
-	return vec3(factor * cos(noise2), factor * sin(noise2), noise1);
-}
-
 vec3 generate_hemisphere_cosine_weighted_direction(inout uint noise) {
 	float noise1 = randomize(noise);
 	float noise2 = randomize(noise) * 2.0 * PI;
 
 	return vec3(sqrt(noise1) * cos(noise2), sqrt(noise1) * sin(noise2), sqrt(1.0 - noise1));
 }
+
+// Distribution generation adapted from "Generating uniformly distributed numbers on a sphere"
+// <http://corysimon.github.io/articles/uniformdistn-on-sphere/>
+vec3 generate_sphere_uniform_direction(inout uint noise) {
+	float theta = 2.0 * PI * randomize(noise);
+	float phi = acos(1.0 - 2.0 * randomize(noise));
+	return vec3(sin(phi) * cos(theta), sin(phi) * sin(theta), cos(phi));
+}
+
+vec3 generate_ray_dir_from_normal(vec3 normal, inout uint noise) {
+	vec3 v0 = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+	vec3 tangent = normalize(cross(v0, normal));
+	vec3 bitangent = normalize(cross(tangent, normal));
+	mat3 normal_mat = mat3(tangent, bitangent, normal);
+	return normal_mat * generate_hemisphere_cosine_weighted_direction(noise);
+}
+
+#if defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+
+vec3 trace_environment_color(vec3 ray_dir) {
+	vec3 sky_dir = normalize(mat3(bake_params.env_transform) * ray_dir);
+	vec2 st = vec2(atan(sky_dir.x, sky_dir.z), acos(sky_dir.y));
+	if (st.x < 0.0) {
+		st.x += PI * 2.0;
+	}
+
+	return textureLod(sampler2D(environment, linear_sampler), st / vec2(PI * 2.0, PI), 0.0).rgb;
+}
+
+vec3 trace_light(vec3 position, vec3 ray_dir, inout uint noise) {
+	// The lower limit considers the case where the lightmapper might have bounces disabled but light probes are requested.
+	uint max_depth = max(bake_params.bounces, 1);
+	vec3 throughput = vec3(1.0);
+	vec3 light = vec3(0.0);
+	for (uint depth = 0; depth < max_depth; depth++) {
+		uint tidx;
+		vec3 barycentric;
+		uint trace_result = trace_ray(position + ray_dir * bake_params.bias, position + ray_dir * length(bake_params.world_size), tidx, barycentric);
+		if (trace_result == RAY_FRONT) {
+			Vertex vert0 = vertices.data[triangles.data[tidx].indices.x];
+			Vertex vert1 = vertices.data[triangles.data[tidx].indices.y];
+			Vertex vert2 = vertices.data[triangles.data[tidx].indices.z];
+			vec3 uvw = vec3(barycentric.x * vert0.uv + barycentric.y * vert1.uv + barycentric.z * vert2.uv, float(triangles.data[tidx].slice));
+			vec3 direct_light = textureLod(sampler2DArray(source_light, linear_sampler), uvw, 0.0).rgb;
+			vec3 albedo = textureLod(sampler2DArray(albedo_tex, linear_sampler), uvw, 0).rgb;
+			vec3 emissive = textureLod(sampler2DArray(emission_tex, linear_sampler), uvw, 0).rgb;
+			light += throughput * emissive;
+			throughput *= albedo;
+			light += throughput * direct_light * bake_params.bounce_indirect_energy;
+
+			// Use Russian Roulette to determine a probability to terminate the bounce earlier as an optimization.
+			// <https://computergraphics.stackexchange.com/questions/2316/is-russian-roulette-really-the-answer>
+			float p = max(max(throughput.x, throughput.y), throughput.z);
+			if (randomize(noise) > p) {
+				break;
+			}
+
+			// Boost the throughput from the probability of the ray being terminated early.
+			throughput *= 1.0 / p;
+
+			// Compute the position for the next ray that will be traced.
+			position = barycentric.x * vert0.position + barycentric.y * vert1.position + barycentric.z * vert2.position;
+
+			vec3 norm0 = vec3(vert0.normal_xy, vert0.normal_z);
+			vec3 norm1 = vec3(vert1.normal_xy, vert1.normal_z);
+			vec3 norm2 = vec3(vert2.normal_xy, vert2.normal_z);
+			vec3 normal = barycentric.x * norm0 + barycentric.y * norm1 + barycentric.z * norm2;
+
+			// Generate a new ray direction for the next bounce from this surface's normal.
+			ray_dir = generate_ray_dir_from_normal(normal, noise);
+		} else if (trace_result == RAY_MISS) {
+			// Look for the environment color and stop bouncing.
+			light += throughput * trace_environment_color(ray_dir);
+			break;
+		} else {
+			// Ignore any other trace results.
+			break;
+		}
+	}
+
+	return light;
+}
+
+#endif
 
 float get_omni_attenuation(float distance, float inv_range, float decay) {
 	float nd = distance * inv_range;
@@ -294,15 +354,16 @@ float get_omni_attenuation(float distance, float inv_range, float decay) {
 }
 
 void main() {
+	// Check if invocation is out of bounds.
 #ifdef MODE_LIGHT_PROBES
 	int probe_index = int(gl_GlobalInvocationID.x);
-	if (probe_index >= params.atlas_size.x) { //too large, do nothing
+	if (probe_index >= params.probe_count) {
 		return;
 	}
 
 #else
 	ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy) + params.region_ofs;
-	if (any(greaterThanEqual(atlas_pos, params.atlas_size))) { //too large, do nothing
+	if (any(greaterThanEqual(atlas_pos, bake_params.atlas_size))) {
 		return;
 	}
 #endif
@@ -314,11 +375,8 @@ void main() {
 		return; //empty texel, no process
 	}
 	vec3 position = texelFetch(sampler2DArray(source_position, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).xyz;
-
-	//go through all lights
-	//start by own light (emissive)
-	vec3 static_light = vec3(0.0);
-	vec3 dynamic_light = vec3(0.0);
+	vec3 light_for_texture = vec3(0.0);
+	vec3 light_for_bounces = vec3(0.0);
 
 #ifdef USE_SH_LIGHTMAPS
 	vec4 sh_accum[4] = vec4[](
@@ -328,15 +386,15 @@ void main() {
 			vec4(0.0, 0.0, 0.0, 1.0));
 #endif
 
-	for (uint i = 0; i < params.light_count; i++) {
+	for (uint i = 0; i < bake_params.light_count; i++) {
 		vec3 light_pos;
 		float dist;
 		float attenuation;
 		float soft_shadowing_disk_size;
 		if (lights.data[i].type == LIGHT_TYPE_DIRECTIONAL) {
 			vec3 light_vec = lights.data[i].direction;
-			light_pos = position - light_vec * length(params.world_size);
-			dist = length(params.world_size);
+			light_pos = position - light_vec * length(bake_params.world_size);
+			dist = length(bake_params.world_size);
 			attenuation = 1.0;
 			soft_shadowing_disk_size = lights.data[i].size;
 		} else {
@@ -405,22 +463,22 @@ void main() {
 				vec2 disk_sample = (r * vec2(cos(a), sin(a))) * soft_shadowing_disk_size * lights.data[i].shadow_blur;
 				light_disk_to_point = normalize(light_to_point + disk_sample.x * light_to_point_tan + disk_sample.y * light_to_point_bitan);
 
-				if (trace_ray(position - light_disk_to_point * params.bias, position - light_disk_to_point * dist) == RAY_MISS) {
+				if (trace_ray(position - light_disk_to_point * bake_params.bias, position - light_disk_to_point * dist) == RAY_MISS) {
 					hits++;
 				}
 			}
 			penumbra = float(hits) / float(shadowing_ray_count);
 		} else {
-			if (trace_ray(position + light_dir * params.bias, light_pos) == RAY_MISS) {
+			if (trace_ray(position + light_dir * bake_params.bias, light_pos) == RAY_MISS) {
 				penumbra = 1.0;
 			}
 		}
 
 		vec3 light = lights.data[i].color * lights.data[i].energy * attenuation * penumbra;
 		if (lights.data[i].static_bake) {
-			static_light += light;
-#ifdef USE_SH_LIGHTMAPS
+			light_for_texture += light;
 
+#ifdef USE_SH_LIGHTMAPS
 			float c[4] = float[](
 					0.282095, //l0
 					0.488603 * light_dir.y, //l1n1
@@ -432,52 +490,28 @@ void main() {
 				sh_accum[j].rgb += light * c[j] * 8.0;
 			}
 #endif
-
-		} else {
-			dynamic_light += light;
 		}
+
+		light_for_bounces += light * lights.data[i].indirect_energy;
 	}
 
-	vec3 albedo = texelFetch(sampler2DArray(albedo_tex, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).rgb;
-	vec3 emissive = texelFetch(sampler2DArray(emission_tex, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).rgb;
-
-	dynamic_light *= albedo; //if it will bounce, must multiply by albedo
-	dynamic_light += emissive;
-
-	//keep for lightprobes
-	imageStore(primary_dynamic, ivec3(atlas_pos, params.atlas_slice), vec4(dynamic_light, 1.0));
-
-	dynamic_light += static_light * albedo; //send for bounces
-	dynamic_light *= params.env_transform[2][3]; // exposure_normalization
-	imageStore(dest_light, ivec3(atlas_pos, params.atlas_slice), vec4(dynamic_light, 1.0));
+	light_for_bounces *= bake_params.exposure_normalization;
+	imageStore(dest_light, ivec3(atlas_pos, params.atlas_slice), vec4(light_for_bounces, 1.0));
 
 #ifdef USE_SH_LIGHTMAPS
-	//keep for adding at the end
+	// Keep for adding at the end.
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + 0), sh_accum[0]);
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + 1), sh_accum[1]);
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + 2), sh_accum[2]);
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + 3), sh_accum[3]);
-
 #else
-	static_light *= params.env_transform[2][3]; // exposure_normalization
-	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), vec4(static_light, 1.0));
+	light_for_texture *= bake_params.exposure_normalization;
+	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), vec4(light_for_texture, 1.0));
 #endif
 
 #endif
 
 #ifdef MODE_BOUNCE_LIGHT
-
-	vec3 normal = texelFetch(sampler2DArray(source_normal, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).xyz;
-	if (length(normal) < 0.5) {
-		return; //empty texel, no process
-	}
-
-	vec3 position = texelFetch(sampler2DArray(source_position, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).xyz;
-
-	vec3 v0 = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-	vec3 tangent = normalize(cross(v0, normal));
-	vec3 bitangent = normalize(cross(tangent, normal));
-	mat3 normal_mat = mat3(tangent, bitangent, normal);
 
 #ifdef USE_SH_LIGHTMAPS
 	vec4 sh_accum[4] = vec4[](
@@ -485,50 +519,24 @@ void main() {
 			vec4(0.0, 0.0, 0.0, 1.0),
 			vec4(0.0, 0.0, 0.0, 1.0),
 			vec4(0.0, 0.0, 0.0, 1.0));
+#else
+	vec3 light_accum = vec3(0.0);
 #endif
-	vec3 light_average = vec3(0.0);
-	float active_rays = 0.0;
+
+	// Retrieve starting normal and position.
+	vec3 normal = texelFetch(sampler2DArray(source_normal, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).xyz;
+	if (length(normal) < 0.5) {
+		// The pixel is empty, skip processing it.
+		return;
+	}
+
+	vec3 position = texelFetch(sampler2DArray(source_position, linear_sampler), ivec3(atlas_pos, params.atlas_slice), 0).xyz;
 	uint noise = random_seed(ivec3(params.ray_from, atlas_pos));
 	for (uint i = params.ray_from; i < params.ray_to; i++) {
-		vec3 ray_dir = normal_mat * generate_hemisphere_cosine_weighted_direction(noise);
-
-		uint tidx;
-		vec3 barycentric;
-
-		vec3 light = vec3(0.0);
-		uint trace_result = trace_ray(position + ray_dir * params.bias, position + ray_dir * length(params.world_size), tidx, barycentric);
-		if (trace_result == RAY_FRONT) {
-			//hit a triangle
-			vec2 uv0 = vertices.data[triangles.data[tidx].indices.x].uv;
-			vec2 uv1 = vertices.data[triangles.data[tidx].indices.y].uv;
-			vec2 uv2 = vertices.data[triangles.data[tidx].indices.z].uv;
-			vec3 uvw = vec3(barycentric.x * uv0 + barycentric.y * uv1 + barycentric.z * uv2, float(triangles.data[tidx].slice));
-
-			light = textureLod(sampler2DArray(source_light, linear_sampler), uvw, 0.0).rgb;
-			active_rays += 1.0;
-		} else if (trace_result == RAY_MISS) {
-			if (params.env_transform[0][3] == 0.0) { // Use env_transform[0][3] to indicate when we are computing the first bounce
-				// Did not hit a triangle, reach out for the sky
-				vec3 sky_dir = normalize(mat3(params.env_transform) * ray_dir);
-
-				vec2 st = vec2(
-						atan(sky_dir.x, sky_dir.z),
-						acos(sky_dir.y));
-
-				if (st.x < 0.0)
-					st.x += PI * 2.0;
-
-				st /= vec2(PI * 2.0, PI);
-
-				light = textureLod(sampler2D(environment, linear_sampler), st, 0.0).rgb;
-			}
-			active_rays += 1.0;
-		}
-
-		light_average += light;
+		vec3 ray_dir = generate_ray_dir_from_normal(normal, noise);
+		vec3 light = trace_light(position, ray_dir, noise);
 
 #ifdef USE_SH_LIGHTMAPS
-
 		float c[4] = float[](
 				0.282095, //l0
 				0.488603 * ray_dir.y, //l1n1
@@ -537,44 +545,25 @@ void main() {
 		);
 
 		for (uint j = 0; j < 4; j++) {
-			sh_accum[j].rgb += light * c[j] * (8.0 / float(params.ray_count));
+			sh_accum[j].rgb += light * c[j] * 8.0;
 		}
+#else
+		light_accum += light;
 #endif
 	}
 
-	vec3 light_total;
-	if (params.ray_from == 0) {
-		light_total = vec3(0.0);
-	} else {
-		vec4 accum = imageLoad(bounce_accum, ivec3(atlas_pos, params.atlas_slice));
-		light_total = accum.rgb;
-		active_rays += accum.a;
-	}
-
-	light_total += light_average;
-
+	// Add the averaged result to the accumulated light texture.
 #ifdef USE_SH_LIGHTMAPS
-
 	for (int i = 0; i < 4; i++) {
 		vec4 accum = imageLoad(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + i));
-		accum.rgb += sh_accum[i].rgb;
+		accum.rgb += sh_accum[i].rgb / float(params.ray_count);
 		imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + i), accum);
 	}
-
+#else
+	vec4 accum = imageLoad(accum_light, ivec3(atlas_pos, params.atlas_slice));
+	accum.rgb += light_accum / float(params.ray_count);
+	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), accum);
 #endif
-	if (params.ray_to == params.ray_count) {
-		if (active_rays > 0) {
-			light_total /= active_rays;
-		}
-		imageStore(dest_light, ivec3(atlas_pos, params.atlas_slice), vec4(light_total, 1.0));
-#ifndef USE_SH_LIGHTMAPS
-		vec4 accum = imageLoad(accum_light, ivec3(atlas_pos, params.atlas_slice));
-		accum.rgb += light_total;
-		imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), accum);
-#endif
-	} else {
-		imageStore(bounce_accum, ivec3(atlas_pos, params.atlas_slice), vec4(light_total, active_rays));
-	}
 
 #endif
 
@@ -597,7 +586,7 @@ void main() {
 	vec3 v0 = abs(face_normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
 	vec3 tangent = normalize(cross(v0, face_normal));
 	vec3 bitangent = normalize(cross(tangent, face_normal));
-	vec3 base_pos = vertex_pos + face_normal * params.bias; //raise a bit
+	vec3 base_pos = vertex_pos + face_normal * bake_params.bias; // Raise a bit.
 
 	vec3 rays[4] = vec3[](tangent, bitangent, -tangent, -bitangent);
 	float min_d = 1e20;
@@ -608,7 +597,8 @@ void main() {
 
 		if (trace_ray(base_pos, ray_to, d, norm) == RAY_BACK) {
 			if (d < min_d) {
-				vertex_pos = base_pos + rays[i] * d + norm * params.bias * 10.0; //this bias needs to be greater than the regular bias, because otherwise later, rays will go the other side when pointing back.
+				// This bias needs to be greater than the regular bias, because otherwise later, rays will go the other side when pointing back.
+				vertex_pos = base_pos + rays[i] * d + norm * bake_params.bias * 10.0;
 				min_d = d;
 			}
 		}
@@ -637,58 +627,24 @@ void main() {
 
 	uint noise = random_seed(ivec3(params.ray_from, probe_index, 49502741 /* some prime */));
 	for (uint i = params.ray_from; i < params.ray_to; i++) {
-		vec3 ray_dir = generate_hemisphere_uniform_direction(noise);
-		if (bool(i & 1)) {
-			//throw to both sides, so alternate them
-			ray_dir.z *= -1.0;
-		}
+		vec3 ray_dir = generate_sphere_uniform_direction(noise);
+		vec3 light = trace_light(position, ray_dir, noise);
 
-		uint tidx;
-		vec3 barycentric;
-		vec3 light;
+		float c[9] = float[](
+				0.282095, //l0
+				0.488603 * ray_dir.y, //l1n1
+				0.488603 * ray_dir.z, //l1n0
+				0.488603 * ray_dir.x, //l1p1
+				1.092548 * ray_dir.x * ray_dir.y, //l2n2
+				1.092548 * ray_dir.y * ray_dir.z, //l2n1
+				//0.315392 * (ray_dir.x * ray_dir.x + ray_dir.y * ray_dir.y + 2.0 * ray_dir.z * ray_dir.z), //l20
+				0.315392 * (3.0 * ray_dir.z * ray_dir.z - 1.0), //l20
+				1.092548 * ray_dir.x * ray_dir.z, //l2p1
+				0.546274 * (ray_dir.x * ray_dir.x - ray_dir.y * ray_dir.y) //l2p2
+		);
 
-		uint trace_result = trace_ray(position + ray_dir * params.bias, position + ray_dir * length(params.world_size), tidx, barycentric);
-		if (trace_result == RAY_FRONT) {
-			vec2 uv0 = vertices.data[triangles.data[tidx].indices.x].uv;
-			vec2 uv1 = vertices.data[triangles.data[tidx].indices.y].uv;
-			vec2 uv2 = vertices.data[triangles.data[tidx].indices.z].uv;
-			vec3 uvw = vec3(barycentric.x * uv0 + barycentric.y * uv1 + barycentric.z * uv2, float(triangles.data[tidx].slice));
-
-			light = textureLod(sampler2DArray(source_light, linear_sampler), uvw, 0.0).rgb;
-			light += textureLod(sampler2DArray(source_direct_light, linear_sampler), uvw, 0.0).rgb;
-		} else if (trace_result == RAY_MISS) {
-			//did not hit a triangle, reach out for the sky
-			vec3 sky_dir = normalize(mat3(params.env_transform) * ray_dir);
-
-			vec2 st = vec2(
-					atan(sky_dir.x, sky_dir.z),
-					acos(sky_dir.y));
-
-			if (st.x < 0.0)
-				st.x += PI * 2.0;
-
-			st /= vec2(PI * 2.0, PI);
-
-			light = textureLod(sampler2D(environment, linear_sampler), st, 0.0).rgb;
-		}
-
-		{
-			float c[9] = float[](
-					0.282095, //l0
-					0.488603 * ray_dir.y, //l1n1
-					0.488603 * ray_dir.z, //l1n0
-					0.488603 * ray_dir.x, //l1p1
-					1.092548 * ray_dir.x * ray_dir.y, //l2n2
-					1.092548 * ray_dir.y * ray_dir.z, //l2n1
-					//0.315392 * (ray_dir.x * ray_dir.x + ray_dir.y * ray_dir.y + 2.0 * ray_dir.z * ray_dir.z), //l20
-					0.315392 * (3.0 * ray_dir.z * ray_dir.z - 1.0), //l20
-					1.092548 * ray_dir.x * ray_dir.z, //l2p1
-					0.546274 * (ray_dir.x * ray_dir.x - ray_dir.y * ray_dir.y) //l2p2
-			);
-
-			for (uint j = 0; j < 9; j++) {
-				probe_sh_accum[j].rgb += light * c[j];
-			}
+		for (uint j = 0; j < 9; j++) {
+			probe_sh_accum[j].rgb += light * c[j];
 		}
 	}
 
@@ -860,8 +816,8 @@ void main() {
 					float weight = 1.0f;
 
 					// Ignore weight if search position is out of bounds.
-					weight *= step(0, search_pos.x) * step(search_pos.x, params.atlas_size.x - 1);
-					weight *= step(0, search_pos.y) * step(search_pos.y, params.atlas_size.y - 1);
+					weight *= step(0, search_pos.x) * step(search_pos.x, bake_params.atlas_size.x - 1);
+					weight *= step(0, search_pos.y) * step(search_pos.y, bake_params.atlas_size.y - 1);
 
 					// Ignore weight if normal is zero length.
 					weight *= step(EPSILON, length(search_normal));

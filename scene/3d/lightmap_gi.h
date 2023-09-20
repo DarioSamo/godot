@@ -147,6 +147,7 @@ private:
 	bool use_denoiser = true;
 	float denoiser_strength = 0.1f;
 	int bounces = 3;
+	float bounce_indirect_energy = 1.0;
 	float bias = 0.0005;
 	int max_texture_size = 16384;
 	bool interior = false;
@@ -263,6 +264,9 @@ public:
 
 	void set_bounces(int p_bounces);
 	int get_bounces() const;
+
+	void set_bounce_indirect_energy(float p_indirect_energy);
+	float get_bounce_indirect_energy() const;
 
 	void set_bias(float p_bias);
 	float get_bias() const;
