@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "core/config/engine.h"
+#include "core/config/project_settings.h"
 #include "servers/rendering/rendering_device.h"
 
 #include <glslang/Include/Types.h>
@@ -161,6 +162,12 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 	spv::SpvBuildLogger logger;
 	glslang::SpvOptions spvOptions;
 
+	bool optimize = GLOBAL_GET("rendering/shader_compiler/shader_compilation/optimize");
+	if (optimize) {
+		spvOptions.disableOptimizer = false;
+		spvOptions.optimizeSize = true;
+	}
+
 	if (Engine::get_singleton()->is_generate_spirv_debug_info_enabled()) {
 		spvOptions.generateDebugInfo = true;
 		spvOptions.emitNonSemanticShaderDebugInfo = true;
@@ -181,7 +188,8 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 static String _get_cache_key_function_glsl(const RenderingDevice *p_render_device) {
 	const RD::Capabilities *capabilities = p_render_device->get_device_capabilities();
 	String version;
-	version = "SpirVGen=" + itos(glslang::GetSpirvGeneratorVersion()) + ", major=" + itos(capabilities->version_major) + ", minor=" + itos(capabilities->version_minor) + " , subgroup_size=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_SIZE)) + " , subgroup_ops=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS)) + " , subgroup_in_shaders=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS)) + " , debug=" + itos(Engine::get_singleton()->is_generate_spirv_debug_info_enabled());
+	bool optimize = GLOBAL_GET("rendering/shader_compiler/shader_compilation/optimize");
+	version = "SpirVGen=" + itos(glslang::GetSpirvGeneratorVersion()) + ", major=" + itos(capabilities->version_major) + ", minor=" + itos(capabilities->version_minor) + " , subgroup_size=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_SIZE)) + " , subgroup_ops=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS)) + " , subgroup_in_shaders=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS)) + " , debug=" + itos(Engine::get_singleton()->is_generate_spirv_debug_info_enabled()) + " , optimize=" + itos(optimize);
 	return version;
 }
 
