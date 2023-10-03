@@ -39,7 +39,10 @@
 #include "core/templates/hashfuncs.h"
 #include "drivers/vulkan/vulkan_context.h"
 
+#include "spirv-tools/libspirv.h"
+#include "spirv-tools/optimizer.hpp"
 #include "thirdparty/misc/smolv.h"
+#include "thirdparty/spirv-reflect/spirv_reflect.h"
 
 //#define FORCE_FULL_BARRIER
 
@@ -4638,8 +4641,9 @@ String RenderingDeviceVulkan::_shader_uniform_debug(RID p_shader, int p_set) {
 // Version 1: initial.
 // Version 2: Added shader name.
 // Version 3: Added writable.
+// Version 4: Added spec constant word offset.
 
-#define SHADER_BINARY_VERSION 3
+#define SHADER_BINARY_VERSION 4
 
 String RenderingDeviceVulkan::shader_get_binary_cache_key() const {
 	return "Vulkan-SV" + itos(SHADER_BINARY_VERSION);
@@ -4656,6 +4660,7 @@ struct RenderingDeviceVulkanShaderBinaryDataBinding {
 struct RenderingDeviceVulkanShaderBinarySpecializationConstant {
 	uint32_t type;
 	uint32_t constant_id;
+	uint32_t word_offset;
 	union {
 		uint32_t int_value;
 		float float_value;
@@ -4724,6 +4729,7 @@ Vector<uint8_t> RenderingDeviceVulkan::shader_compile_binary_from_spirv(const Ve
 			RenderingDeviceVulkanShaderBinarySpecializationConstant spec_constant{};
 			spec_constant.type = (uint32_t)spirv_sc.type;
 			spec_constant.constant_id = spirv_sc.constant_id;
+			spec_constant.word_offset = spirv_sc.word_offset;
 			spec_constant.int_value = spirv_sc.int_value;
 			spec_constant.stage_flags = (uint32_t)spirv_sc.stages_mask;
 			specialization_constants.push_back(spec_constant);
@@ -4989,6 +4995,7 @@ RID RenderingDeviceVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_
 		sc.constant.int_value = src_sc.int_value;
 		sc.constant.type = PipelineSpecializationConstantType(src_sc.type);
 		sc.constant.constant_id = src_sc.constant_id;
+		sc.constant.word_offset = src_sc.word_offset;
 		sc.stage_flags = src_sc.stage_flags;
 		specialization_constants.push_back(sc);
 
@@ -5066,7 +5073,6 @@ RID RenderingDeviceVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_
 	shader->name = name;
 
 	String error_text;
-
 	bool success = true;
 	for (int i = 0; i < stage_spirv_data.size(); i++) {
 		VkShaderModuleCreateInfo shader_module_create_info;
@@ -5140,6 +5146,12 @@ RID RenderingDeviceVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_
 
 			shader->sets.push_back(set);
 			shader->set_formats.push_back(format);
+		}
+
+		bool patch_spirv_spec_constants = true;
+		if (patch_spirv_spec_constants) {
+			shader->stage_spirv_data = stage_spirv_data;
+			shader->stage_type = stage_type;
 		}
 	}
 
@@ -6455,51 +6467,188 @@ RID RenderingDeviceVulkan::render_pipeline_create(RID p_shader, FramebufferForma
 	Vector<VkSpecializationInfo> specialization_info;
 	Vector<Vector<VkSpecializationMapEntry>> specialization_map_entries;
 	Vector<uint32_t> specialization_constant_data;
+	LocalVector<VkShaderModule> temporary_shader_modules;
 
 	if (shader->specialization_constants.size()) {
-		specialization_constant_data.resize(shader->specialization_constants.size());
-		uint32_t *data_ptr = specialization_constant_data.ptrw();
-		specialization_info.resize(pipeline_stages.size());
-		specialization_map_entries.resize(pipeline_stages.size());
-		for (int i = 0; i < shader->specialization_constants.size(); i++) {
-			// See if overridden.
-			const Shader::SpecializationConstant &sc = shader->specialization_constants[i];
-			data_ptr[i] = sc.constant.int_value; // Just copy the 32 bits.
+		// TODO: Enable this conditionally based on whether the platform needs this.
+		bool patch_spirv_spec_constants = false;
+		if (patch_spirv_spec_constants) {
+			// Patch the specialization constants present in the SPIR-V to fixed constants instead with the values from the parameters.
+			// This works around drivers that don't implement specialization constants correctly.
+			for (int i = 0; i < pipeline_stages.size(); i++) {
+				LocalVector<uint32_t> patched_spec_constant_ids;
+				Vector<uint8_t> patched_spirv_data;
+				uint32_t *patched_spirv_words;
+				uint32_t patched_spirv_words_count = 0;
+				patched_spec_constant_ids.reserve(uint32_t(shader->specialization_constants.size()));
+				for (int j = 0; j < shader->specialization_constants.size(); j++) {
+					const Shader::SpecializationConstant &sc = shader->specialization_constants[j];
+					if (sc.stage_flags & (1U << shader->stage_type[i])) {
+						// The word offsets will only make sense if the specialization constant was only found in one shader stage.
+						DEV_ASSERT(sc.stage_flags == (1U << shader->stage_type[i]));
 
-			for (int j = 0; j < p_specialization_constants.size(); j++) {
-				const PipelineSpecializationConstant &psc = p_specialization_constants[j];
-				if (psc.constant_id == sc.constant.constant_id) {
-					ERR_FAIL_COND_V_MSG(psc.type != sc.constant.type, RID(), "Specialization constant provided for id (" + itos(sc.constant.constant_id) + ") is of the wrong type.");
-					data_ptr[i] = psc.int_value;
-					break;
+						if (patched_spirv_data.is_empty()) {
+							patched_spirv_data = shader->stage_spirv_data[i];
+							patched_spirv_words = reinterpret_cast<uint32_t *>(patched_spirv_data.ptrw());
+							patched_spirv_words_count = patched_spirv_data.size() / sizeof(uint32_t);
+						}
+
+						uint32_t int_value = sc.constant.int_value;
+						for (int k = 0; k < p_specialization_constants.size(); k++) {
+							const PipelineSpecializationConstant &psc = p_specialization_constants[k];
+							if (psc.constant_id == sc.constant.constant_id) {
+								ERR_FAIL_COND_V_MSG(psc.type != sc.constant.type, RID(), "Specialization constant provided for id (" + itos(sc.constant.constant_id) + ") is of the wrong type.");
+								int_value = psc.int_value;
+								break;
+							}
+						}
+
+						uint32_t &dst_word = patched_spirv_words[sc.constant.word_offset];
+						switch (sc.constant.type) {
+							case PIPELINE_SPECIALIZATION_CONSTANT_TYPE_BOOL: {
+								DEV_ASSERT((dst_word & 0xFFFF) == (sc.constant.bool_value ? SpvOpSpecConstantTrue : SpvOpSpecConstantFalse));
+								SpvOp new_op = int_value ? SpvOpConstantTrue : SpvOpConstantFalse;
+								dst_word = new_op | (dst_word & 0xFFFF0000);
+								patched_spec_constant_ids.push_back(sc.constant.constant_id);
+							} break;
+							case PIPELINE_SPECIALIZATION_CONSTANT_TYPE_INT:
+							case PIPELINE_SPECIALIZATION_CONSTANT_TYPE_FLOAT: {
+								DEV_ASSERT((dst_word & 0xFFFF) == SpvOpSpecConstant);
+								DEV_ASSERT(((dst_word & 0xFFFF0000) >> 16) == 4);
+								uint32_t &dst_value = patched_spirv_words[sc.constant.word_offset + 3];
+								SpvOp new_op = SpvOpConstant;
+								dst_word = new_op | (dst_word & 0xFFFF0000);
+								dst_value = int_value;
+								patched_spec_constant_ids.push_back(sc.constant.constant_id);
+							}
+							default: {
+							} break;
+						}
+					}
+				}
+
+				if (!patched_spirv_data.is_empty()) {
+					// Reduce SPIR-V data by removing all decorators associated to the specialization constants that were patched away.
+					thread_local LocalVector<uint32_t> reduced_spirv_words;
+					reduced_spirv_words.clear();
+					reduced_spirv_words.reserve(patched_spirv_words_count);
+
+					uint32_t word_index = 0;
+					while (word_index < SPIRV_STARTING_WORD_INDEX) {
+						reduced_spirv_words.push_back(patched_spirv_words[word_index]);
+						word_index++;
+					}
+
+					while (word_index < patched_spirv_words_count) {
+						uint32_t &word = patched_spirv_words[word_index];
+						uint32_t op = word & 0xFFFFU;
+						uint32_t word_count = (word >> 16U) & 0xFFFFU;
+						bool eliminate_instruction = false;
+						if (op == SpvOpDecorate) {
+							uint32_t &decoration = patched_spirv_words[word_index + 2];
+							if (decoration == SpvDecorationSpecId) {
+								uint32_t &constant_id = patched_spirv_words[word_index + 3];
+								if (patched_spec_constant_ids.find(constant_id) >= 0) {
+									eliminate_instruction = true;
+								}
+							}
+						}
+
+						if (!eliminate_instruction) {
+							for (uint32_t k = 0; k < word_count; k++) {
+								reduced_spirv_words.push_back(patched_spirv_words[word_index + k]);
+							}
+						}
+
+						word_index += word_count;
+					}
+
+					DEV_ASSERT(reduced_spirv_words.size() < patched_spirv_words_count);
+
+					// Create the new shader module to be used by the pipeline.
+					VkShaderModuleCreateInfo shader_module_create_info;
+					shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+					shader_module_create_info.pNext = nullptr;
+					shader_module_create_info.flags = 0;
+
+					thread_local std::vector<uint32_t> optimized_spirv;
+
+					// TODO: Enable this conditionally whether or not it helps on the platform we're testing if SCs work as they should or not.
+					bool use_optimizer_on_patched_spirv = false;
+					if (use_optimizer_on_patched_spirv) {
+						// Run the optimizer to eliminate dead branches.
+						spvtools::Optimizer optimizer(spv_target_env::SPV_ENV_VULKAN_1_2);
+						spvtools::OptimizerOptions optimizer_options;
+						optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+						optimizer_options.set_preserve_bindings(true);
+						optimizer_options.set_run_validator(false);
+						bool optimized = optimizer.Run(reduced_spirv_words.ptr(), reduced_spirv_words.size(), &optimized_spirv, optimizer_options);
+						ERR_FAIL_COND_V_MSG(!optimized, RID(), "spvtools::Optimizer::Run failed for shader '" + shader->name + "'.");
+
+						shader_module_create_info.codeSize = optimized_spirv.size() * sizeof(uint32_t);
+						shader_module_create_info.pCode = optimized_spirv.data();
+					} else {
+						shader_module_create_info.codeSize = reduced_spirv_words.size() * sizeof(uint32_t);
+						shader_module_create_info.pCode = reduced_spirv_words.ptr();
+					}
+
+					VkShaderModule shader_module;
+					VkResult err = vkCreateShaderModule(device, &shader_module_create_info, nullptr, &shader_module);
+					ERR_FAIL_COND_V_MSG(err, RID(), "vkCreateShaderModule failed with error " + itos(err) + " for shader '" + shader->name + "'.");
+
+					pipeline_stages.write[i].module = shader_module;
+
+					// Store the reference to the new shader module so we can delete it later.
+					temporary_shader_modules.push_back(shader_module);
+				} else {
+					temporary_shader_modules.push_back(nullptr);
 				}
 			}
+		} else {
+			specialization_constant_data.resize(shader->specialization_constants.size());
+			uint32_t *data_ptr = specialization_constant_data.ptrw();
+			specialization_info.resize(pipeline_stages.size());
+			specialization_map_entries.resize(pipeline_stages.size());
+			for (int i = 0; i < shader->specialization_constants.size(); i++) {
+				// See if overridden.
+				const Shader::SpecializationConstant &sc = shader->specialization_constants[i];
+				data_ptr[i] = sc.constant.int_value; // Just copy the 32 bits.
 
-			VkSpecializationMapEntry entry;
+				for (int j = 0; j < p_specialization_constants.size(); j++) {
+					const PipelineSpecializationConstant &psc = p_specialization_constants[j];
+					if (psc.constant_id == sc.constant.constant_id) {
+						ERR_FAIL_COND_V_MSG(psc.type != sc.constant.type, RID(), "Specialization constant provided for id (" + itos(sc.constant.constant_id) + ") is of the wrong type.");
+						data_ptr[i] = psc.int_value;
+						break;
+					}
+				}
 
-			entry.constantID = sc.constant.constant_id;
-			entry.offset = i * sizeof(uint32_t);
-			entry.size = sizeof(uint32_t);
+				VkSpecializationMapEntry entry;
 
-			for (int j = 0; j < SHADER_STAGE_MAX; j++) {
-				if (sc.stage_flags & (1 << j)) {
-					VkShaderStageFlagBits stage = shader_stage_masks[j];
-					for (int k = 0; k < pipeline_stages.size(); k++) {
-						if (pipeline_stages[k].stage == stage) {
-							specialization_map_entries.write[k].push_back(entry);
+				entry.constantID = sc.constant.constant_id;
+				entry.offset = i * sizeof(uint32_t);
+				entry.size = sizeof(uint32_t);
+
+				for (int j = 0; j < SHADER_STAGE_MAX; j++) {
+					if (sc.stage_flags & (1 << j)) {
+						VkShaderStageFlagBits stage = shader_stage_masks[j];
+						for (int k = 0; k < pipeline_stages.size(); k++) {
+							if (pipeline_stages[k].stage == stage) {
+								specialization_map_entries.write[k].push_back(entry);
+							}
 						}
 					}
 				}
 			}
-		}
 
-		for (int i = 0; i < pipeline_stages.size(); i++) {
-			if (specialization_map_entries[i].size()) {
-				specialization_info.write[i].dataSize = specialization_constant_data.size() * sizeof(uint32_t);
-				specialization_info.write[i].pData = data_ptr;
-				specialization_info.write[i].mapEntryCount = specialization_map_entries[i].size();
-				specialization_info.write[i].pMapEntries = specialization_map_entries[i].ptr();
-				pipeline_stages.write[i].pSpecializationInfo = specialization_info.ptr() + i;
+			for (int i = 0; i < pipeline_stages.size(); i++) {
+				if (specialization_map_entries[i].size()) {
+					specialization_info.write[i].dataSize = specialization_constant_data.size() * sizeof(uint32_t);
+					specialization_info.write[i].pData = data_ptr;
+					specialization_info.write[i].mapEntryCount = specialization_map_entries[i].size();
+					specialization_info.write[i].pMapEntries = specialization_map_entries[i].ptr();
+					pipeline_stages.write[i].pSpecializationInfo = specialization_info.ptr() + i;
+				}
 			}
 		}
 	}
@@ -6526,6 +6675,12 @@ RID RenderingDeviceVulkan::render_pipeline_create(RID p_shader, FramebufferForma
 	RenderPipeline pipeline;
 	VkResult err = vkCreateGraphicsPipelines(device, pipelines_cache.cache_object, 1, &graphics_pipeline_create_info, nullptr, &pipeline.pipeline);
 	ERR_FAIL_COND_V_MSG(err, RID(), "vkCreateGraphicsPipelines failed with error " + itos(err) + " for shader '" + shader->name + "'.");
+
+	for (uint32_t i = 0; i < temporary_shader_modules.size(); i++) {
+		if (temporary_shader_modules[i] != nullptr) {
+			vkDestroyShaderModule(device, temporary_shader_modules[i], nullptr);
+		}
+	}
 
 	if (pipelines_cache.cache_object != VK_NULL_HANDLE) {
 		_update_pipeline_cache();

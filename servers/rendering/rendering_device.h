@@ -874,6 +874,7 @@ public:
 	struct PipelineSpecializationConstant {
 		PipelineSpecializationConstantType type;
 		uint32_t constant_id;
+		uint32_t word_offset;
 		union {
 			uint32_t int_value;
 			float float_value;
@@ -1390,6 +1391,7 @@ protected:
 		struct SpecializationConstant {
 			PipelineSpecializationConstantType type;
 			uint32_t constant_id;
+			uint32_t word_offset;
 			union {
 				uint32_t int_value;
 				float float_value;

@@ -3739,6 +3739,7 @@ static SpvReflectResult ParseSpecializationConstants(SpvReflectPrvParser* p_pars
 
     p_module->specialization_constants[index].name = p_node->name;
     p_module->specialization_constants[index].constant_id = p_node->decorations.specialization_constant.value;
+	p_module->specialization_constants[index].word_offset = p_node->word_offset;
     p_module->specialization_constants[index].spirv_id = p_node->result_id;
     index++;
   }

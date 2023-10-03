@@ -615,6 +615,10 @@ class RenderingDeviceVulkan : public RenderingDevice {
 	// to do quick validation and ensuring the user
 	// does not submit something invalid.
 
+	enum {
+		SPIRV_STARTING_WORD_INDEX = 5
+	};
+
 	struct Shader {
 		struct Set {
 			Vector<UniformInfo> uniform_info;
@@ -643,6 +647,8 @@ class RenderingDeviceVulkan : public RenderingDevice {
 		Vector<uint32_t> set_formats;
 		Vector<VkPipelineShaderStageCreateInfo> pipeline_stages;
 		Vector<SpecializationConstant> specialization_constants;
+		Vector<Vector<uint8_t>> stage_spirv_data;
+		Vector<ShaderStage> stage_type;
 		VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 		String name; // Used for debug.
 	};

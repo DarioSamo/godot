@@ -374,6 +374,7 @@ typedef struct SpvReflectSpecializationConstant {
   const char* name;
   uint32_t spirv_id;
   uint32_t constant_id;
+  uint32_t word_offset;
   SpvReflectSpecializationConstantType constant_type;
   union {
     float float_value;

@@ -9,6 +9,9 @@ thirdparty_volk_dir = "#thirdparty/volk"
 # Use bundled Vulkan headers
 env.Prepend(CPPPATH=[thirdparty_dir, thirdparty_dir + "/include"])
 
+# Use bundled SPIR-V Tools headers
+env.Prepend(CPPPATH=["#thirdparty/spirv-tools/include"])
+
 if env["use_volk"]:
     env.AppendUnique(CPPDEFINES=["USE_VOLK"])
     env.Prepend(CPPPATH=[thirdparty_volk_dir])
