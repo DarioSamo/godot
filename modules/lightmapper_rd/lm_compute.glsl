@@ -119,30 +119,18 @@ const uint RAY_FRONT = 1;
 const uint RAY_BACK = 2;
 const uint RAY_ANY = 3;
 
-uint trace_ray(vec3 p_from, vec3 p_to
-#if defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
-		,
-		out uint r_triangle, out vec3 r_barycentric
-#endif
-#if defined(MODE_UNOCCLUDE)
-		,
-		out float r_distance, out vec3 r_normal
-#endif
-) {
-
-	/* world coords */
-
+uint trace_ray(vec3 p_from, vec3 p_to, bool p_any_hit, out float r_distance, out vec3 r_normal, out uint r_triangle, out vec3 r_barycentric) {
+	// World coordinates.
 	vec3 rel = p_to - p_from;
 	float rel_len = length(rel);
 	vec3 dir = normalize(rel);
 	vec3 inv_dir = 1.0 / dir;
 
-	/* cell coords */
-
+	// Cell coordinates.
 	vec3 from_cell = (p_from - bake_params.to_cell_offset) * bake_params.to_cell_size;
 	vec3 to_cell = (p_to - bake_params.to_cell_offset) * bake_params.to_cell_size;
 
-	//prepare DDA
+	// Prepare DDA.
 	vec3 rel_cell = to_cell - from_cell;
 	ivec3 icell = ivec3(from_cell);
 	ivec3 iendcell = ivec3(to_cell);
@@ -151,72 +139,66 @@ uint trace_ray(vec3 p_from, vec3 p_to
 	ivec3 step = ivec3(sign(rel_cell));
 	vec3 side = (sign(rel_cell) * (vec3(icell) - from_cell) + (sign(rel_cell) * 0.5) + 0.5) * delta;
 
+	uint hit = RAY_MISS;
+	float best_distance = 1e20;
 	uint iters = 0;
-	while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(bake_params.grid_size))) && iters < 1000) {
+	while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(bake_params.grid_size))) && (iters < 1000)) {
 		uvec2 cell_data = texelFetch(usampler3D(grid, linear_sampler), icell, 0).xy;
 		if (cell_data.x > 0) { //triangles here
-			uint hit = RAY_MISS;
-			float best_distance = 1e20;
-
 			for (uint i = 0; i < cell_data.x; i++) {
 				uint tidx = grid_indices.data[cell_data.y + i];
 
-				//Ray-Box test
+				// Ray-Box test.
 				Triangle triangle = triangles.data[tidx];
 				vec3 t0 = (triangle.min_bounds - p_from) * inv_dir;
 				vec3 t1 = (triangle.max_bounds - p_from) * inv_dir;
 				vec3 tmin = min(t0, t1), tmax = max(t0, t1);
 
 				if (max(tmin.x, max(tmin.y, tmin.z)) > min(tmax.x, min(tmax.y, tmax.z))) {
-					continue; //ray box failed
+					continue; // Ray-Box test failed.
 				}
 
-				//prepare triangle vertices
+				// Prepare triangle vertices.
 				vec3 vtx0 = vertices.data[triangle.indices.x].position;
 				vec3 vtx1 = vertices.data[triangle.indices.y].position;
 				vec3 vtx2 = vertices.data[triangle.indices.z].position;
-#if defined(MODE_UNOCCLUDE) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
 				vec3 normal = -normalize(cross((vtx0 - vtx1), (vtx0 - vtx2)));
-
 				bool backface = dot(normal, dir) >= 0.0;
-#endif
-
 				float distance;
 				vec3 barycentric;
-
 				if (ray_hits_triangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
-#ifdef MODE_DIRECT_LIGHT
-					return RAY_ANY; //any hit good
-#endif
+					vec3 position = p_from + dir * distance;
+					vec3 hit_cell = (position - bake_params.to_cell_offset) * bake_params.to_cell_size;
+					if (icell != ivec3(hit_cell)) {
+						// Hit must be inside of this cell.
+						continue;
+					}
 
-#if defined(MODE_UNOCCLUDE) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+					if (p_any_hit) {
+						// Return early if any hit was requested.
+						return RAY_ANY;
+					}
+
 					if (!backface) {
-						// the case of meshes having both a front and back face in the same plane is more common than
-						// expected, so if this is a front-face, bias it closer to the ray origin, so it always wins over the back-face
+						// The case of meshes having both a front and back face in the same plane is more common than expected.
+						// If this is a front-face, bias it closer to the ray origin, so it always wins over the back-face.
 						distance = max(bake_params.bias, distance - bake_params.bias);
 					}
 
 					if (distance < best_distance) {
 						hit = backface ? RAY_BACK : RAY_FRONT;
 						best_distance = distance;
-#if defined(MODE_UNOCCLUDE)
 						r_distance = distance;
 						r_normal = normal;
-#endif
-#if defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
 						r_triangle = tidx;
 						r_barycentric = barycentric;
-#endif
 					}
-#endif
 				}
 			}
-#if defined(MODE_UNOCCLUDE) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
 
 			if (hit != RAY_MISS) {
 				return hit;
 			}
-#endif
 		}
 
 		if (icell == iendcell) {
@@ -226,11 +208,30 @@ uint trace_ray(vec3 p_from, vec3 p_to
 		bvec3 mask = lessThanEqual(side.xyz, min(side.yzx, side.zxy));
 		side += vec3(mask) * delta;
 		icell += ivec3(vec3(mask)) * step;
-
 		iters++;
 	}
 
-	return RAY_MISS;
+	return hit;
+}
+
+uint trace_ray_closest_hit_triangle(vec3 p_from, vec3 p_to, out uint r_triangle, out vec3 r_barycentric) {
+	float distance;
+	vec3 normal;
+	return trace_ray(p_from, p_to, false, distance, normal, r_triangle, r_barycentric);
+}
+
+uint trace_ray_closest_hit_distance(vec3 p_from, vec3 p_to, out float r_distance, out vec3 r_normal) {
+	uint triangle;
+	vec3 barycentric;
+	return trace_ray(p_from, p_to, false, r_distance, r_normal, triangle, barycentric);
+}
+
+uint trace_ray_any_hit(vec3 p_from, vec3 p_to) {
+	float distance;
+	vec3 normal;
+	uint triangle;
+	vec3 barycentric;
+	return trace_ray(p_from, p_to, true, distance, normal, triangle, barycentric);
 }
 
 // https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
@@ -276,6 +277,116 @@ vec3 generate_ray_dir_from_normal(vec3 normal, inout uint noise) {
 	return normal_mat * generate_hemisphere_cosine_weighted_direction(noise);
 }
 
+#if defined(MODE_DIRECT_LIGHT) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+
+float get_omni_attenuation(float distance, float inv_range, float decay) {
+	float nd = distance * inv_range;
+	nd *= nd;
+	nd *= nd; // nd^4
+	nd = max(1.0 - nd, 0.0);
+	nd *= nd; // nd^2
+	return nd * pow(max(distance, 0.0001), -decay);
+}
+
+void trace_direct_light(vec3 p_position, vec3 p_normal, uint p_light_index, bool p_soft_shadowing, out vec3 r_light, out vec3 r_light_dir, inout uint r_noise) {
+	r_light = vec3(0.0f);
+
+	vec3 light_pos;
+	float dist;
+	float attenuation;
+	float soft_shadowing_disk_size;
+	Light light_data = lights.data[p_light_index];
+	if (light_data.type == LIGHT_TYPE_DIRECTIONAL) {
+		vec3 light_vec = light_data.direction;
+		light_pos = p_position - light_vec * length(bake_params.world_size);
+		r_light_dir = normalize(light_pos - p_position);
+		dist = length(bake_params.world_size);
+		attenuation = 1.0;
+		soft_shadowing_disk_size = light_data.size;
+	} else {
+		light_pos = light_data.position;
+		r_light_dir = normalize(light_pos - p_position);
+		dist = distance(p_position, light_pos);
+		if (dist > light_data.range) {
+			return;
+		}
+
+		soft_shadowing_disk_size = light_data.size / dist;
+
+		attenuation = get_omni_attenuation(dist, 1.0 / light_data.range, light_data.attenuation);
+
+		if (light_data.type == LIGHT_TYPE_SPOT) {
+			vec3 rel = normalize(p_position - light_pos);
+			float cos_spot_angle = light_data.cos_spot_angle;
+			float cos_angle = dot(rel, light_data.direction);
+
+			if (cos_angle < cos_spot_angle) {
+				return;
+			}
+
+			float scos = max(cos_angle, cos_spot_angle);
+			float spot_rim = max(0.0001, (1.0 - scos) / (1.0 - cos_spot_angle));
+			attenuation *= 1.0 - pow(spot_rim, light_data.inv_spot_attenuation);
+		}
+	}
+
+	attenuation *= max(0.0, dot(p_normal, r_light_dir));
+	if (attenuation <= 0.0001) {
+		return;
+	}
+
+	float penumbra = 0.0;
+	if ((light_data.size > 0.0) && p_soft_shadowing) {
+		vec3 light_to_point = -r_light_dir;
+		vec3 aux = light_to_point.y < 0.777 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+		vec3 light_to_point_tan = normalize(cross(light_to_point, aux));
+		vec3 light_to_point_bitan = normalize(cross(light_to_point, light_to_point_tan));
+
+		const uint shadowing_rays_check_penumbra_denom = 2;
+		uint shadowing_ray_count = p_soft_shadowing ? params.ray_count : 1;
+
+		uint hits = 0;
+		vec3 light_disk_to_point = light_to_point;
+		for (uint j = 0; j < shadowing_ray_count; j++) {
+			// Optimization:
+			// Once already traced an important proportion of rays, if all are hits or misses,
+			// assume we're not in the penumbra so we can infer the rest would have the same result
+			if (p_soft_shadowing) {
+				if (j == shadowing_ray_count / shadowing_rays_check_penumbra_denom) {
+					if (hits == j) {
+						// Assume totally lit
+						hits = shadowing_ray_count;
+						break;
+					} else if (hits == 0) {
+						// Assume totally dark
+						hits = 0;
+						break;
+					}
+				}
+			}
+
+			float r = randomize(r_noise);
+			float a = randomize(r_noise) * 2.0 * PI;
+			vec2 disk_sample = (r * vec2(cos(a), sin(a))) * soft_shadowing_disk_size * light_data.shadow_blur;
+			light_disk_to_point = normalize(light_to_point + disk_sample.x * light_to_point_tan + disk_sample.y * light_to_point_bitan);
+
+			if (trace_ray_any_hit(p_position - light_disk_to_point * bake_params.bias, p_position - light_disk_to_point * dist) == RAY_MISS) {
+				hits++;
+			}
+		}
+
+		penumbra = float(hits) / float(shadowing_ray_count);
+	} else {
+		if (trace_ray_any_hit(p_position + r_light_dir * bake_params.bias, light_pos) == RAY_MISS) {
+			penumbra = 1.0;
+		}
+	}
+
+	r_light = light_data.color * light_data.energy * attenuation * penumbra;
+}
+
+#endif
+
 #if defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
 
 vec3 trace_environment_color(vec3 ray_dir) {
@@ -288,21 +399,45 @@ vec3 trace_environment_color(vec3 ray_dir) {
 	return textureLod(sampler2D(environment, linear_sampler), st / vec2(PI * 2.0, PI), 0.0).rgb;
 }
 
-vec3 trace_light(vec3 position, vec3 ray_dir, inout uint noise) {
+vec3 trace_indirect_light(vec3 p_position, vec3 p_ray_dir, inout uint r_noise) {
 	// The lower limit considers the case where the lightmapper might have bounces disabled but light probes are requested.
+	vec3 position = p_position;
+	vec3 ray_dir = p_ray_dir;
 	uint max_depth = max(bake_params.bounces, 1);
 	vec3 throughput = vec3(1.0);
 	vec3 light = vec3(0.0);
 	for (uint depth = 0; depth < max_depth; depth++) {
 		uint tidx;
 		vec3 barycentric;
-		uint trace_result = trace_ray(position + ray_dir * bake_params.bias, position + ray_dir * length(bake_params.world_size), tidx, barycentric);
+		uint trace_result = trace_ray_closest_hit_triangle(position + ray_dir * bake_params.bias, position + ray_dir * length(bake_params.world_size), tidx, barycentric);
 		if (trace_result == RAY_FRONT) {
 			Vertex vert0 = vertices.data[triangles.data[tidx].indices.x];
 			Vertex vert1 = vertices.data[triangles.data[tidx].indices.y];
 			Vertex vert2 = vertices.data[triangles.data[tidx].indices.z];
 			vec3 uvw = vec3(barycentric.x * vert0.uv + barycentric.y * vert1.uv + barycentric.z * vert2.uv, float(triangles.data[tidx].slice));
-			vec3 direct_light = textureLod(sampler2DArray(source_light, linear_sampler), uvw, 0.0).rgb;
+			position = barycentric.x * vert0.position + barycentric.y * vert1.position + barycentric.z * vert2.position;
+
+			vec3 norm0 = vec3(vert0.normal_xy, vert0.normal_z);
+			vec3 norm1 = vec3(vert1.normal_xy, vert1.normal_z);
+			vec3 norm2 = vec3(vert2.normal_xy, vert2.normal_z);
+			vec3 normal = barycentric.x * norm0 + barycentric.y * norm1 + barycentric.z * norm2;
+
+			vec3 direct_light = vec3(0.0f);
+#ifdef USE_LIGHT_TEXTURE_FOR_BOUNCES
+			direct_light += textureLod(sampler2DArray(source_light, linear_sampler), uvw, 0.0).rgb;
+#else
+			// Trace the lights directly. Significantly more expensive but more accurate in scenarios
+			// where the lightmap texture isn't reliable.
+			for (uint i = 0; i < bake_params.light_count; i++) {
+				vec3 light;
+				vec3 light_dir;
+				trace_direct_light(position, normal, i, false, light, light_dir, r_noise);
+				direct_light += light * lights.data[i].indirect_energy;
+			}
+
+			direct_light *= bake_params.exposure_normalization;
+#endif
+
 			vec3 albedo = textureLod(sampler2DArray(albedo_tex, linear_sampler), uvw, 0).rgb;
 			vec3 emissive = textureLod(sampler2DArray(emission_tex, linear_sampler), uvw, 0).rgb;
 			light += throughput * emissive;
@@ -312,23 +447,15 @@ vec3 trace_light(vec3 position, vec3 ray_dir, inout uint noise) {
 			// Use Russian Roulette to determine a probability to terminate the bounce earlier as an optimization.
 			// <https://computergraphics.stackexchange.com/questions/2316/is-russian-roulette-really-the-answer>
 			float p = max(max(throughput.x, throughput.y), throughput.z);
-			if (randomize(noise) > p) {
+			if (randomize(r_noise) > p) {
 				break;
 			}
 
 			// Boost the throughput from the probability of the ray being terminated early.
 			throughput *= 1.0 / p;
 
-			// Compute the position for the next ray that will be traced.
-			position = barycentric.x * vert0.position + barycentric.y * vert1.position + barycentric.z * vert2.position;
-
-			vec3 norm0 = vec3(vert0.normal_xy, vert0.normal_z);
-			vec3 norm1 = vec3(vert1.normal_xy, vert1.normal_z);
-			vec3 norm2 = vec3(vert2.normal_xy, vert2.normal_z);
-			vec3 normal = barycentric.x * norm0 + barycentric.y * norm1 + barycentric.z * norm2;
-
 			// Generate a new ray direction for the next bounce from this surface's normal.
-			ray_dir = generate_ray_dir_from_normal(normal, noise);
+			ray_dir = generate_ray_dir_from_normal(normal, r_noise);
 		} else if (trace_result == RAY_MISS) {
 			// Look for the environment color and stop bouncing.
 			light += throughput * trace_environment_color(ray_dir);
@@ -343,15 +470,6 @@ vec3 trace_light(vec3 position, vec3 ray_dir, inout uint noise) {
 }
 
 #endif
-
-float get_omni_attenuation(float distance, float inv_range, float decay) {
-	float nd = distance * inv_range;
-	nd *= nd;
-	nd *= nd; // nd^4
-	nd = max(1.0 - nd, 0.0);
-	nd *= nd; // nd^2
-	return nd * pow(max(distance, 0.0001), -decay);
-}
 
 void main() {
 	// Check if invocation is out of bounds.
@@ -386,95 +504,13 @@ void main() {
 			vec4(0.0, 0.0, 0.0, 1.0));
 #endif
 
+	// Use atlas position and a prime number as the seed.
+	uint noise = random_seed(ivec3(atlas_pos, 43573547));
 	for (uint i = 0; i < bake_params.light_count; i++) {
-		vec3 light_pos;
-		float dist;
-		float attenuation;
-		float soft_shadowing_disk_size;
-		if (lights.data[i].type == LIGHT_TYPE_DIRECTIONAL) {
-			vec3 light_vec = lights.data[i].direction;
-			light_pos = position - light_vec * length(bake_params.world_size);
-			dist = length(bake_params.world_size);
-			attenuation = 1.0;
-			soft_shadowing_disk_size = lights.data[i].size;
-		} else {
-			light_pos = lights.data[i].position;
-			dist = distance(position, light_pos);
-			if (dist > lights.data[i].range) {
-				continue;
-			}
-			soft_shadowing_disk_size = lights.data[i].size / dist;
+		vec3 light;
+		vec3 light_dir;
+		trace_direct_light(position, normal, i, true, light, light_dir, noise);
 
-			attenuation = get_omni_attenuation(dist, 1.0 / lights.data[i].range, lights.data[i].attenuation);
-
-			if (lights.data[i].type == LIGHT_TYPE_SPOT) {
-				vec3 rel = normalize(position - light_pos);
-				float cos_spot_angle = lights.data[i].cos_spot_angle;
-				float cos_angle = dot(rel, lights.data[i].direction);
-
-				if (cos_angle < cos_spot_angle) {
-					continue; //invisible, dont try
-				}
-
-				float scos = max(cos_angle, cos_spot_angle);
-				float spot_rim = max(0.0001, (1.0 - scos) / (1.0 - cos_spot_angle));
-				attenuation *= 1.0 - pow(spot_rim, lights.data[i].inv_spot_attenuation);
-			}
-		}
-
-		vec3 light_dir = normalize(light_pos - position);
-		attenuation *= max(0.0, dot(normal, light_dir));
-
-		if (attenuation <= 0.0001) {
-			continue; //no need to do anything
-		}
-
-		float penumbra = 0.0;
-		if (lights.data[i].size > 0.0) {
-			vec3 light_to_point = -light_dir;
-			vec3 aux = light_to_point.y < 0.777 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-			vec3 light_to_point_tan = normalize(cross(light_to_point, aux));
-			vec3 light_to_point_bitan = normalize(cross(light_to_point, light_to_point_tan));
-
-			const uint shadowing_rays_check_penumbra_denom = 2;
-			uint shadowing_ray_count = params.ray_count;
-
-			uint hits = 0;
-			uint noise = random_seed(ivec3(atlas_pos, 43573547 /* some prime */));
-			vec3 light_disk_to_point = light_to_point;
-			for (uint j = 0; j < shadowing_ray_count; j++) {
-				// Optimization:
-				// Once already traced an important proportion of rays, if all are hits or misses,
-				// assume we're not in the penumbra so we can infer the rest would have the same result
-				if (j == shadowing_ray_count / shadowing_rays_check_penumbra_denom) {
-					if (hits == j) {
-						// Assume totally lit
-						hits = shadowing_ray_count;
-						break;
-					} else if (hits == 0) {
-						// Assume totally dark
-						hits = 0;
-						break;
-					}
-				}
-
-				float r = randomize(noise);
-				float a = randomize(noise) * 2.0 * PI;
-				vec2 disk_sample = (r * vec2(cos(a), sin(a))) * soft_shadowing_disk_size * lights.data[i].shadow_blur;
-				light_disk_to_point = normalize(light_to_point + disk_sample.x * light_to_point_tan + disk_sample.y * light_to_point_bitan);
-
-				if (trace_ray(position - light_disk_to_point * bake_params.bias, position - light_disk_to_point * dist) == RAY_MISS) {
-					hits++;
-				}
-			}
-			penumbra = float(hits) / float(shadowing_ray_count);
-		} else {
-			if (trace_ray(position + light_dir * bake_params.bias, light_pos) == RAY_MISS) {
-				penumbra = 1.0;
-			}
-		}
-
-		vec3 light = lights.data[i].color * lights.data[i].energy * attenuation * penumbra;
 		if (lights.data[i].static_bake) {
 			light_for_texture += light;
 
@@ -534,7 +570,7 @@ void main() {
 	uint noise = random_seed(ivec3(params.ray_from, atlas_pos));
 	for (uint i = params.ray_from; i < params.ray_to; i++) {
 		vec3 ray_dir = generate_ray_dir_from_normal(normal, noise);
-		vec3 light = trace_light(position, ray_dir, noise);
+		vec3 light = trace_indirect_light(position, ray_dir, noise);
 
 #ifdef USE_SH_LIGHTMAPS
 		float c[4] = float[](
@@ -595,7 +631,7 @@ void main() {
 		float d;
 		vec3 norm;
 
-		if (trace_ray(base_pos, ray_to, d, norm) == RAY_BACK) {
+		if (trace_ray_closest_hit_distance(base_pos, ray_to, d, norm) == RAY_BACK) {
 			if (d < min_d) {
 				// This bias needs to be greater than the regular bias, because otherwise later, rays will go the other side when pointing back.
 				vertex_pos = base_pos + rays[i] * d + norm * bake_params.bias * 10.0;
@@ -628,7 +664,7 @@ void main() {
 	uint noise = random_seed(ivec3(params.ray_from, probe_index, 49502741 /* some prime */));
 	for (uint i = params.ray_from; i < params.ray_to; i++) {
 		vec3 ray_dir = generate_sphere_uniform_direction(noise);
-		vec3 light = trace_light(position, ray_dir, noise);
+		vec3 light = trace_indirect_light(position, ray_dir, noise);
 
 		float c[9] = float[](
 				0.282095, //l0
