@@ -83,6 +83,31 @@ layout(set = 0, binding = 9) uniform texture2DArray emission_tex;
 
 layout(set = 0, binding = 10) uniform sampler linear_sampler;
 
+layout(set = 0, binding = 11, std430) restrict readonly buffer BVHSortingAxis {
+	uint data[];
+}
+bvh_sorting_axis;
+
+layout(set = 0, binding = 12, std430) restrict readonly buffer BVHAABBFloats {
+	float data[];
+}
+bvh_aabb_floats;
+
+layout(set = 0, binding = 13, std430) restrict readonly buffer BVHTriangleIndices {
+	uint data[];
+}
+bvh_triangle_indices;
+
+layout(set = 0, binding = 14, std430) restrict readonly buffer BVHTriangleStart {
+	uint data[];
+}
+bvh_triangle_start;
+
+layout(set = 0, binding = 15, std430) restrict readonly buffer BVHTriangleEnd {
+	uint data[];
+}
+bvh_triangle_end;
+
 // Fragment action constants
 const uint FA_NONE = 0;
 const uint FA_SMOOTHEN_POSITION = 1;

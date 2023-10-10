@@ -275,7 +275,7 @@ Lightmapper::BakeError LightmapperRD::_blit_meshes_into_atlas(int p_max_texture_
 	return BAKE_OK;
 }
 
-void LightmapperRD::_create_acceleration_structures(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, AABB &bounds, int grid_size, Vector<Probe> &p_probe_positions, GenerateProbes p_generate_probes, Vector<int> &slice_triangle_count, Vector<int> &slice_seam_count, RID &vertex_buffer, RID &triangle_buffer, RID &lights_buffer, RID &triangle_cell_indices_buffer, RID &probe_positions_buffer, RID &grid_texture, RID &seams_buffer, BakeStepFunc p_step_function, void *p_bake_userdata) {
+void LightmapperRD::_create_acceleration_structures(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, AABB &bounds, int grid_size, Vector<Probe> &p_probe_positions, GenerateProbes p_generate_probes, Vector<int> &slice_triangle_count, Vector<int> &slice_seam_count, RID &vertex_buffer, RID &triangle_buffer, RID &lights_buffer, RID &triangle_cell_indices_buffer, RID &probe_positions_buffer, RID &grid_texture, RID &seams_buffer, RID &r_bvh_sorting_axis, RID &r_bvh_aabb_floats, RID &r_bvh_triangle_indices, RID &r_bvh_triangle_start, RID &r_bvh_triangle_end, BakeStepFunc p_step_function, void *p_bake_userdata) {
 	HashMap<Vertex, uint32_t, VertexHash> vertex_map;
 
 	//fill triangles array and vertex array
@@ -538,6 +538,114 @@ void LightmapperRD::_create_acceleration_structures(RenderingDevice *rd, Size2i 
 		texdata.write[0] = grid_indices.to_byte_array();
 		grid_texture = rd->texture_create(tf, RD::TextureView(), texdata);
 	}
+
+	// BVH
+
+	const uint32_t triangle_count = triangles.size();
+	LocalVector<AABB> triangle_aabbs;
+	LocalVector<TriangleBVH> triangles_sorted;
+	triangle_aabbs.resize(triangle_count);
+	triangles_sorted.resize(triangle_count);
+	for (uint32_t i = 0; i < triangle_count; i++) {
+		const Triangle &triangle = triangles[i];
+		AABB &triangle_aabb = triangle_aabbs[i];
+		const float *pos_a = vertex_array[triangle.indices[0]].position;
+		const float *pos_b = vertex_array[triangle.indices[1]].position;
+		const float *pos_c = vertex_array[triangle.indices[2]].position;
+		triangle_aabb.size = Vector3();
+		triangle_aabb.position = Vector3(pos_a[0], pos_a[1], pos_a[2]);
+		triangle_aabb.expand_to(Vector3(pos_b[0], pos_b[1], pos_b[2]));
+		triangle_aabb.expand_to(Vector3(pos_c[0], pos_c[1], pos_c[2]));
+		triangles_sorted[i].index = i;
+		triangles_sorted[i].center = triangle_aabb.get_center();
+	}
+
+	const uint32_t bvh_node_count = next_power_of_2(triangle_count) / 3 + 4;
+	bvh_aabb_floats.resize(bvh_node_count * 6);
+	bvh_sorting_axis.resize(bvh_node_count);
+	bvh_triangle_indices.resize(triangle_count);
+	bvh_triangle_start.resize(bvh_node_count);
+	bvh_triangle_end.resize(bvh_node_count);
+	memset(bvh_triangle_start.ptr(), 0, sizeof(uint32_t) * bvh_node_count);
+	memset(bvh_triangle_end.ptr(), 0, sizeof(uint32_t) * bvh_node_count);
+
+	AABB bvh_node_aabb;
+	uint32_t bvh_node_index = 0;
+	uint32_t triangle_sorted_start = 0;
+	uint32_t triangle_sorted_end = 0;
+	SortArray<TriangleBVH, TriangleSortBVH<0>> triangle_sorter_x;
+	SortArray<TriangleBVH, TriangleSortBVH<1>> triangle_sorter_y;
+	SortArray<TriangleBVH, TriangleSortBVH<2>> triangle_sorter_z;
+	TriangleBVH *triangles_sorted_ptr = nullptr;
+	uint32_t triangles_sorted_length = 0;
+	uint32_t triangles_per_child = 0;
+	uint32_t bvh_first_child_index = 0;
+	uint32_t triangles_child_index = 0;
+	int longest_axis_index = 0;
+	float *bvh_aabb_floats_ptr = nullptr;
+	bvh_triangle_end[0] = triangle_count;
+	while (bvh_node_index < bvh_node_count) {
+		triangle_sorted_start = bvh_triangle_start[bvh_node_index];
+		triangle_sorted_end = bvh_triangle_end[bvh_node_index];
+
+		DEV_ASSERT(triangle_sorted_start < triangle_count);
+		DEV_ASSERT(triangle_sorted_end <= triangle_count);
+
+		bvh_node_aabb = triangle_aabbs[triangles_sorted[triangle_sorted_start].index];
+		for (uint32_t i = triangle_sorted_start + 1; i < triangle_sorted_end; i++) {
+			bvh_node_aabb.merge_with(triangle_aabbs[triangles_sorted[i].index]);
+		}
+
+		triangles_sorted_ptr = &triangles_sorted[triangle_sorted_start];
+		triangles_sorted_length = triangle_sorted_end - triangle_sorted_start;
+		longest_axis_index = bvh_node_aabb.get_longest_axis_index();
+		switch (longest_axis_index) {
+			case 0:
+				triangle_sorter_x.sort(triangles_sorted_ptr, triangles_sorted_length);
+				break;
+			case 1:
+				triangle_sorter_y.sort(triangles_sorted_ptr, triangles_sorted_length);
+				break;
+			case 2:
+				triangle_sorter_z.sort(triangles_sorted_ptr, triangles_sorted_length);
+				break;
+			default:
+				DEV_ASSERT(false && "Invalid axis returned by AABB.");
+				break;
+		}
+
+		bvh_aabb_floats_ptr = &bvh_aabb_floats[bvh_node_index * 6];
+		bvh_aabb_floats_ptr[0] = float(bvh_node_aabb.position[0]);
+		bvh_aabb_floats_ptr[1] = float(bvh_node_aabb.position[1]);
+		bvh_aabb_floats_ptr[2] = float(bvh_node_aabb.position[2]);
+		bvh_aabb_floats_ptr[3] = float(bvh_node_aabb.position[0] + bvh_node_aabb.size[0]);
+		bvh_aabb_floats_ptr[4] = float(bvh_node_aabb.position[1] + bvh_node_aabb.size[1]);
+		bvh_aabb_floats_ptr[5] = float(bvh_node_aabb.position[2] + bvh_node_aabb.size[2]);
+		bvh_sorting_axis[bvh_node_index] = uint32_t(longest_axis_index);
+
+		triangles_per_child = (triangles_sorted_length + 3) / 4;
+		bvh_first_child_index = bvh_node_index * 4 + 1;
+		if ((triangles_per_child > 0) && (bvh_first_child_index < bvh_node_count)) {
+			triangles_child_index = triangle_sorted_start;
+			for (uint32_t i = 0; i < 4; i++) {
+				bvh_triangle_start[bvh_first_child_index + i] = std::min(triangles_child_index, triangle_count);
+				bvh_triangle_end[bvh_first_child_index + i] = std::min(triangles_child_index + triangles_per_child, triangle_count);
+				triangles_child_index += triangles_per_child;
+			}
+		}
+
+		bvh_node_index++;
+	}
+
+	for (uint32_t i = 0; i < triangle_count; i++) {
+		bvh_triangle_indices[i] = triangles_sorted[i].index;
+	}
+
+	r_bvh_sorting_axis = rd->storage_buffer_create(bvh_sorting_axis.size() * sizeof(uint32_t), bvh_sorting_axis.to_byte_array());
+	r_bvh_aabb_floats = rd->storage_buffer_create(bvh_aabb_floats.size() * sizeof(float), bvh_aabb_floats.to_byte_array());
+	r_bvh_triangle_indices = rd->storage_buffer_create(bvh_triangle_indices.size() * sizeof(uint32_t), bvh_triangle_indices.to_byte_array());
+	r_bvh_triangle_start = rd->storage_buffer_create(bvh_triangle_start.size() * sizeof(uint32_t), bvh_triangle_start.to_byte_array());
+	r_bvh_triangle_end = rd->storage_buffer_create(bvh_triangle_end.size() * sizeof(uint32_t), bvh_triangle_end.to_byte_array());
 }
 
 void LightmapperRD::_raster_geometry(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, int grid_size, AABB bounds, float p_bias, Vector<int> slice_triangle_count, RID position_tex, RID unocclude_tex, RID normal_tex, RID raster_depth_buffer, RID rasterize_shader, RID raster_base_uniform) {
@@ -879,7 +987,11 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 	RID grid_texture;
 	RID seams_buffer;
 	RID probe_positions_buffer;
-
+	RID bvh_sorting_axis_buffer;
+	RID bvh_aabb_floats_buffer;
+	RID bvh_triangle_indices_buffer;
+	RID bvh_triangle_start_buffer;
+	RID bvh_triangle_end_buffer;
 	Vector<int> slice_seam_count;
 
 #define FREE_BUFFERS                        \
@@ -889,9 +1001,14 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 	rd->free(triangle_cell_indices_buffer); \
 	rd->free(grid_texture);                 \
 	rd->free(seams_buffer);                 \
-	rd->free(probe_positions_buffer);
+	rd->free(probe_positions_buffer);       \
+	rd->free(bvh_sorting_axis_buffer);      \
+	rd->free(bvh_aabb_floats_buffer);       \
+	rd->free(bvh_triangle_indices_buffer);  \
+	rd->free(bvh_triangle_start_buffer);    \
+	rd->free(bvh_triangle_end_buffer);
 
-	_create_acceleration_structures(rd, atlas_size, atlas_slices, bounds, grid_size, probe_positions, p_generate_probes, slice_triangle_count, slice_seam_count, vertex_buffer, triangle_buffer, lights_buffer, triangle_cell_indices_buffer, probe_positions_buffer, grid_texture, seams_buffer, p_step_function, p_bake_userdata);
+	_create_acceleration_structures(rd, atlas_size, atlas_slices, bounds, grid_size, probe_positions, p_generate_probes, slice_triangle_count, slice_seam_count, vertex_buffer, triangle_buffer, lights_buffer, triangle_cell_indices_buffer, probe_positions_buffer, grid_texture, seams_buffer, bvh_sorting_axis_buffer, bvh_aabb_floats_buffer, bvh_triangle_indices_buffer, bvh_triangle_start_buffer, bvh_triangle_end_buffer, p_step_function, p_bake_userdata);
 
 	if (p_step_function) {
 		p_step_function(0.47, RTR("Preparing shaders"), p_bake_userdata, true);
@@ -995,6 +1112,41 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 			u.uniform_type = RD::UNIFORM_TYPE_SAMPLER;
 			u.binding = 10;
 			u.append_id(sampler);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 11;
+			u.append_id(bvh_sorting_axis_buffer);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 12;
+			u.append_id(bvh_aabb_floats_buffer);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 13;
+			u.append_id(bvh_triangle_indices_buffer);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 14;
+			u.append_id(bvh_triangle_start_buffer);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 15;
+			u.append_id(bvh_triangle_end_buffer);
 			base_uniforms.push_back(u);
 		}
 	}
@@ -1112,6 +1264,10 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 		push_constant.environment_xform[9] = p_environment_transform.rows[1][2];
 		push_constant.environment_xform[10] = p_environment_transform.rows[2][2];
 		push_constant.environment_xform[11] = 0;
+		///
+		push_constant.bvh_node_count = bvh_sorting_axis.size();
+		push_constant.bvh_triangle_count = bvh_triangle_indices.size();
+		///
 	}
 
 	Vector3i group_size((atlas_size.x - 1) / 8 + 1, (atlas_size.y - 1) / 8 + 1, 1);
@@ -1243,6 +1399,8 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 			//no barrier, let them run all together
 		}
 		rd->compute_list_end(); //done
+		rd->submit();
+		rd->sync();
 
 		push_constant.environment_xform[11] = 0.0;
 	}

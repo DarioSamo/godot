@@ -171,6 +171,24 @@ class LightmapperRD : public Lightmapper {
 		}
 	};
 
+	struct TriangleBVH {
+		Vector3 center;
+		uint32_t index;
+	};
+
+	template <int T>
+	struct TriangleSortBVH {
+		bool operator()(const TriangleBVH &p_a, const TriangleBVH &p_b) const {
+			return p_a.center[T] < p_b.center[T];
+		}
+	};
+
+	LocalVector<uint32_t> bvh_sorting_axis;
+	LocalVector<float> bvh_aabb_floats;
+	LocalVector<uint32_t> bvh_triangle_indices;
+	LocalVector<uint32_t> bvh_triangle_start;
+	LocalVector<uint32_t> bvh_triangle_end;
+
 	Vector<MeshInstance> mesh_instances;
 
 	Vector<Light> lights;
@@ -224,6 +242,10 @@ class LightmapperRD : public Lightmapper {
 		int32_t region_ofs[2] = {};
 
 		float environment_xform[12] = {};
+
+		uint32_t bvh_node_count = 0;
+		uint32_t bvh_triangle_count = 0;
+		uint32_t pad[2];
 	};
 
 	Vector<Ref<Image>> bake_textures;
@@ -240,7 +262,7 @@ class LightmapperRD : public Lightmapper {
 	};
 
 	BakeError _blit_meshes_into_atlas(int p_max_texture_size, Vector<Ref<Image>> &albedo_images, Vector<Ref<Image>> &emission_images, AABB &bounds, Size2i &atlas_size, int &atlas_slices, BakeStepFunc p_step_function, void *p_bake_userdata);
-	void _create_acceleration_structures(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, AABB &bounds, int grid_size, Vector<Probe> &probe_positions, GenerateProbes p_generate_probes, Vector<int> &slice_triangle_count, Vector<int> &slice_seam_count, RID &vertex_buffer, RID &triangle_buffer, RID &lights_buffer, RID &triangle_cell_indices_buffer, RID &probe_positions_buffer, RID &grid_texture, RID &seams_buffer, BakeStepFunc p_step_function, void *p_bake_userdata);
+	void _create_acceleration_structures(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, AABB &bounds, int grid_size, Vector<Probe> &probe_positions, GenerateProbes p_generate_probes, Vector<int> &slice_triangle_count, Vector<int> &slice_seam_count, RID &vertex_buffer, RID &triangle_buffer, RID &lights_buffer, RID &triangle_cell_indices_buffer, RID &probe_positions_buffer, RID &grid_texture, RID &seams_buffer, RID &r_bvh_sorting_axis, RID &r_bvh_aabb_floats, RID &r_bvh_triangle_indices, RID &r_bvh_triangle_start, RID &r_bvh_triangle_end, BakeStepFunc p_step_function, void *p_bake_userdata);
 	void _raster_geometry(RenderingDevice *rd, Size2i atlas_size, int atlas_slices, int grid_size, AABB bounds, float p_bias, Vector<int> slice_triangle_count, RID position_tex, RID unocclude_tex, RID normal_tex, RID raster_depth_buffer, RID rasterize_shader, RID raster_base_uniform);
 
 	BakeError _dilate(RenderingDevice *rd, Ref<RDShaderFile> &compute_shader, RID &compute_base_uniform_set, PushConstant &push_constant, RID &source_light_tex, RID &dest_light_tex, const Size2i &atlas_size, int atlas_slices);

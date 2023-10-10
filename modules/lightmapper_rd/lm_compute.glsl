@@ -103,6 +103,11 @@ layout(push_constant, std430) uniform Params {
 	ivec2 region_ofs;
 
 	mat3x4 env_transform;
+
+	// TODO: Move out of push constant
+	uint bvh_node_count;
+	uint bvh_triangle_count;
+	uint pad[2];
 }
 params;
 
@@ -145,14 +150,104 @@ uint trace_ray(vec3 p_from, vec3 p_to
 		out float r_distance, out vec3 r_normal
 #endif
 ) {
-
-	/* world coords */
-
 	vec3 rel = p_to - p_from;
 	float rel_len = length(rel);
 	vec3 dir = normalize(rel);
 	vec3 inv_dir = 1.0 / dir;
 
+#define USE_BVH
+#ifdef USE_BVH
+	uint hit = RAY_MISS;
+	float best_distance = 1e20;
+
+	// Perform a depth-first search to minimize the required stack usage.
+	const uint MAX_DEPTH = 16;
+	uint node_stack[MAX_DEPTH];
+	uint child_index_stack[MAX_DEPTH];
+	uint stack_size = 1;
+	node_stack[0] = 0;
+	child_index_stack[0] = 0;
+	while (stack_size > 0) {
+		uint bvh_node_index = node_stack[stack_size - 1];
+		uint bvh_child_index = bvh_node_index * 4 + 1 + child_index_stack[stack_size - 1];
+
+		if (bvh_child_index >= params.bvh_node_count) {
+			// Leaf node. Pop node from the stack.
+			stack_size -= 1;
+
+			uint bvh_triangle_start = bvh_triangle_start.data[bvh_node_index];
+			uint bvh_triangle_end = bvh_triangle_end.data[bvh_node_index];
+			for (uint bvh_triangle_index = bvh_triangle_start; bvh_triangle_index < bvh_triangle_end; bvh_triangle_index++) {
+				// Ray-Triangle test.
+				uint triangle_index = bvh_triangle_indices.data[bvh_triangle_index];
+				Triangle triangle = triangles.data[triangle_index];
+				vec3 vtx0 = vertices.data[triangle.indices.x].position;
+				vec3 vtx1 = vertices.data[triangle.indices.y].position;
+				vec3 vtx2 = vertices.data[triangle.indices.z].position;
+#if defined(MODE_UNOCCLUDE) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+				vec3 normal = -normalize(cross((vtx0 - vtx1), (vtx0 - vtx2)));
+				bool backface = dot(normal, dir) >= 0.0;
+#endif
+				float distance;
+				vec3 barycentric;
+				if (ray_hits_triangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
+#ifdef MODE_DIRECT_LIGHT
+					return RAY_ANY;
+#endif
+#if defined(MODE_UNOCCLUDE) || defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+					if (!backface) {
+						// the case of meshes having both a front and back face in the same plane is more common than
+						// expected, so if this is a front-face, bias it closer to the ray origin, so it always wins over the back-face
+						distance = max(params.bias, distance - params.bias);
+					}
+
+					if (distance < best_distance) {
+						hit = backface ? RAY_BACK : RAY_FRONT;
+						best_distance = distance;
+#if defined(MODE_UNOCCLUDE)
+						r_distance = distance;
+						r_normal = normal;
+#endif
+#if defined(MODE_BOUNCE_LIGHT) || defined(MODE_LIGHT_PROBES)
+						r_triangle = triangle_index;
+						r_barycentric = barycentric;
+#endif
+					}
+#endif
+				}
+			}
+		} else {
+			if (child_index_stack[stack_size - 1] < 3) {
+				// Advance to the next child.
+				child_index_stack[stack_size - 1] += 1;
+			} else {
+				// Pop node from the stack.
+				stack_size -= 1;
+			}
+
+			// Tree node. Ray-Box against the children's AABB.
+			uint floats_index = bvh_child_index * 6;
+			vec3 aabb_min = vec3(bvh_aabb_floats.data[floats_index + 0], bvh_aabb_floats.data[floats_index + 1], bvh_aabb_floats.data[floats_index + 2]);
+			vec3 aabb_max = vec3(bvh_aabb_floats.data[floats_index + 3], bvh_aabb_floats.data[floats_index + 4], bvh_aabb_floats.data[floats_index + 5]);
+			vec3 t0 = (aabb_min - p_from) * inv_dir;
+			vec3 t1 = (aabb_max - p_from) * inv_dir;
+			vec3 tmin = min(t0, t1);
+			vec3 tmax = max(t0, t1);
+			float tmin_max = max(tmin.x, max(tmin.y, tmin.z));
+			float tmax_min = min(tmax.x, min(tmax.y, tmax.z));
+			if ((tmin_max <= tmax_min) && (tmin_max < best_distance)) {
+				// If there's an intersection, add this child to the stack starting on its first child.
+				if (stack_size < MAX_DEPTH) {
+					node_stack[stack_size] = bvh_child_index;
+					child_index_stack[stack_size] = 0;
+					stack_size += 1;
+				}
+			}
+		}
+	}
+
+	return hit;
+#else
 	/* cell coords */
 
 	vec3 from_cell = (p_from - params.to_cell_offset) * params.to_cell_size;
@@ -247,6 +342,7 @@ uint trace_ray(vec3 p_from, vec3 p_to
 	}
 
 	return RAY_MISS;
+#endif
 }
 
 // https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
@@ -579,6 +675,7 @@ void main() {
 #endif
 
 #ifdef MODE_UNOCCLUDE
+	return;
 
 	//texel_size = 0.5;
 	//compute tangents
@@ -621,6 +718,7 @@ void main() {
 #endif
 
 #ifdef MODE_LIGHT_PROBES
+	return;
 
 	vec3 position = probe_positions.data[probe_index].xyz;
 
