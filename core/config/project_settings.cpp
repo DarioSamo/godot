@@ -1394,6 +1394,7 @@ ProjectSettings::ProjectSettings() {
 	GLOBAL_DEF_BASIC("gui/common/snap_controls_to_pixels", true);
 	GLOBAL_DEF_BASIC("gui/fonts/dynamic_fonts/use_oversampling", true);
 
+	GLOBAL_DEF_INTERNAL("rendering/rendering_device/secondary_command_buffers/max_per_frame", 4);
 	GLOBAL_DEF("rendering/rendering_device/staging_buffer/block_size_kb", 256);
 	GLOBAL_DEF("rendering/rendering_device/staging_buffer/max_size_mb", 128);
 	GLOBAL_DEF("rendering/rendering_device/staging_buffer/texture_upload_region_size_px", 64);
