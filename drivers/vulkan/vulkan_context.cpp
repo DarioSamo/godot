@@ -1516,13 +1516,15 @@ Error VulkanContext::_create_physical_device(VkSurfaceKHR p_surface) {
 Error VulkanContext::_create_device(VkDevice &r_vk_device) {
 	VkResult err;
 	float queue_priorities[1] = { 0.0 };
-	VkDeviceQueueCreateInfo queues[2];
-	queues[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queues[0].pNext = nullptr;
-	queues[0].queueFamilyIndex = graphics_queue_family_index;
-	queues[0].queueCount = 1;
-	queues[0].pQueuePriorities = queue_priorities;
-	queues[0].flags = 0;
+	VkDeviceQueueCreateInfo queues[3];
+	uint32_t qi = 0;
+	queues[qi].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queues[qi].pNext = nullptr;
+	queues[qi].queueFamilyIndex = graphics_queue_family_index;
+	queues[qi].queueCount = 1;
+	queues[qi].pQueuePriorities = queue_priorities;
+	queues[qi].flags = 0;
+	qi++;
 
 	// Before we retrieved what is supported, here we tell Vulkan we want to enable these features using the same structs.
 	void *nextptr = nullptr;
@@ -1605,11 +1607,31 @@ Error VulkanContext::_create_device(VkDevice &r_vk_device) {
 		enabled_extension_names[enabled_extension_count++] = extension_name.ptr();
 	}
 
+	if (separate_present_queue()) {
+		queues[qi].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queues[qi].pNext = nullptr;
+		queues[qi].queueFamilyIndex = present_queue_family_index;
+		queues[qi].queueCount = 1;
+		queues[qi].pQueuePriorities = queue_priorities;
+		queues[qi].flags = 0;
+		qi++;
+	}
+
+	if (separate_transfer_queue()) {
+		queues[qi].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queues[qi].pNext = nullptr;
+		queues[qi].queueFamilyIndex = transfer_queue_family_index;
+		queues[qi].queueCount = transfer_queues.size();
+		queues[qi].pQueuePriorities = queue_priorities;
+		queues[qi].flags = 0;
+		qi++;
+	}
+
 	VkDeviceCreateInfo sdevice = {
 		/*sType*/ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 		/*pNext*/ nextptr,
 		/*flags*/ 0,
-		/*queueCreateInfoCount*/ 1,
+		/*queueCreateInfoCount*/ qi,
 		/*pQueueCreateInfos*/ queues,
 		/*enabledLayerCount*/ 0,
 		/*ppEnabledLayerNames*/ nullptr,
@@ -1617,15 +1639,6 @@ Error VulkanContext::_create_device(VkDevice &r_vk_device) {
 		/*ppEnabledExtensionNames*/ (const char *const *)enabled_extension_names,
 		/*pEnabledFeatures*/ &physical_device_features, // If specific features are required, pass them in here.
 	};
-	if (separate_present_queue) {
-		queues[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-		queues[1].pNext = nullptr;
-		queues[1].queueFamilyIndex = present_queue_family_index;
-		queues[1].queueCount = 1;
-		queues[1].pQueuePriorities = queue_priorities;
-		queues[1].flags = 0;
-		sdevice.queueCreateInfoCount = 2;
-	}
 
 	if (vulkan_hooks) {
 		if (!vulkan_hooks->create_vulkan_device(&sdevice, &r_vk_device)) {
@@ -1650,9 +1663,11 @@ Error VulkanContext::_initialize_queues(VkSurfaceKHR p_surface) {
 		}
 	}
 
-	// Search for a graphics and a present queue in the array of queue
-	// families, try to find one that supports both.
+	// Search for a graphics, transfer and present queue in the array of queue families.
+	// - Prefer the graphics queue that is also capable of presenting.
+	// - Prefer the dedicated transfer queue that does not support graphics or compute.
 	uint32_t graphicsQueueFamilyIndex = UINT32_MAX;
+	uint32_t transferQueueFamilyIndex = UINT32_MAX;
 	uint32_t presentQueueFamilyIndex = UINT32_MAX;
 	for (uint32_t i = 0; i < queue_family_count; i++) {
 		if ((queue_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
@@ -1660,10 +1675,20 @@ Error VulkanContext::_initialize_queues(VkSurfaceKHR p_surface) {
 				graphicsQueueFamilyIndex = i;
 			}
 
-			if (p_surface && supportsPresent[i] == VK_TRUE) {
+			if (graphicsQueueFamilyIndex != presentQueueFamilyIndex && p_surface && supportsPresent[i] == VK_TRUE) {
 				graphicsQueueFamilyIndex = i;
 				presentQueueFamilyIndex = i;
-				break;
+			}
+		}
+
+		if ((queue_props[i].queueFlags & VK_QUEUE_TRANSFER_BIT) != 0) {
+			if (transferQueueFamilyIndex == UINT32_MAX) {
+				transferQueueFamilyIndex = i;
+			} else {
+				const VkQueueFlags mask_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+				if ((queue_props[i].queueFlags & mask_flags) < (queue_props[transferQueueFamilyIndex].queueFlags & mask_flags)) {
+					transferQueueFamilyIndex = i;
+				}
 			}
 		}
 	}
@@ -1685,12 +1710,14 @@ Error VulkanContext::_initialize_queues(VkSurfaceKHR p_surface) {
 		// Generate error if could not find both a graphics and a present queue.
 		ERR_FAIL_COND_V_MSG(graphicsQueueFamilyIndex == UINT32_MAX || presentQueueFamilyIndex == UINT32_MAX, ERR_CANT_CREATE,
 				"Could not find both graphics and present queues\n");
+	}
 
-		graphics_queue_family_index = graphicsQueueFamilyIndex;
-		present_queue_family_index = presentQueueFamilyIndex;
-		separate_present_queue = (graphics_queue_family_index != present_queue_family_index);
-	} else {
-		graphics_queue_family_index = graphicsQueueFamilyIndex;
+	graphics_queue_family_index = graphicsQueueFamilyIndex;
+	present_queue_family_index = presentQueueFamilyIndex;
+	transfer_queue_family_index = transferQueueFamilyIndex;
+
+	if (separate_transfer_queue()) {
+		transfer_queues.resize(queue_props[transferQueueFamilyIndex].queueCount);
 	}
 
 	_create_device(device);
@@ -1718,12 +1745,16 @@ Error VulkanContext::_initialize_queues(VkSurfaceKHR p_surface) {
 
 	vkGetDeviceQueue(device, graphics_queue_family_index, 0, &graphics_queue);
 
-	if (p_surface) {
-		if (!separate_present_queue) {
-			present_queue = graphics_queue;
-		} else {
-			vkGetDeviceQueue(device, present_queue_family_index, 0, &present_queue);
+	if (!transfer_queues.is_empty()) {
+		for (uint32_t i = 0; i < transfer_queues.size(); i++) {
+			vkGetDeviceQueue(device, transfer_queue_family_index, i, &transfer_queues[i]);
 		}
+	} else {
+		transfer_queues.push_back(graphics_queue);
+	}
+
+	if (p_surface) {
+		vkGetDeviceQueue(device, present_queue_family_index, 0, &present_queue);
 
 		// Get the list of VkFormat's that are supported:
 		uint32_t formatCount;
@@ -1809,7 +1840,7 @@ Error VulkanContext::_create_semaphores() {
 		err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &draw_complete_semaphores[i]);
 		ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 
-		if (separate_present_queue) {
+		if (separate_present_queue()) {
 			err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &image_ownership_semaphores[i]);
 			ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 		}
@@ -1820,6 +1851,11 @@ Error VulkanContext::_create_semaphores() {
 	vkGetPhysicalDeviceMemoryProperties(gpu, &memory_properties);
 
 	return OK;
+}
+
+void VulkanContext::_device_wait_idle(VkDevice p_device) {
+	MutexLock lock(transfer_queue_mutex);
+	vkDeviceWaitIdle(p_device);
 }
 
 bool VulkanContext::_use_validation_layers() {
@@ -1926,7 +1962,8 @@ Error VulkanContext::_clean_up_swap_chain(Window *window) {
 	if (!window->swapchain) {
 		return OK;
 	}
-	vkDeviceWaitIdle(device);
+
+	_device_wait_idle(device);
 
 	// This destroys images associated it seems.
 	fpDestroySwapchainKHR(device, window->swapchain, nullptr);
@@ -1943,7 +1980,7 @@ Error VulkanContext::_clean_up_swap_chain(Window *window) {
 		window->swapchain_image_resources = nullptr;
 		swapchainImageCount = 0;
 	}
-	if (separate_present_queue) {
+	if (separate_present_queue()) {
 		vkDestroyCommandPool(device, window->present_cmd_pool, nullptr);
 	}
 
@@ -2287,7 +2324,7 @@ Error VulkanContext::_update_swap_chain(Window *window) {
 
 	/******** SEPARATE PRESENT QUEUE ************/
 
-	if (separate_present_queue) {
+	if (separate_present_queue()) {
 		const VkCommandPoolCreateInfo present_cmd_pool_info = {
 			/*sType*/ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			/*pNext*/ nullptr,
@@ -2382,65 +2419,18 @@ Error VulkanContext::initialize() {
 	return OK;
 }
 
-void VulkanContext::set_setup_buffer(RDD::CommandBufferID p_command_buffer) {
-	command_buffer_queue[0] = (VkCommandBuffer)p_command_buffer.id;
-}
-
 void VulkanContext::append_command_buffer(RDD::CommandBufferID p_command_buffer) {
-	if (command_buffer_queue.size() <= command_buffer_count) {
-		command_buffer_queue.resize(command_buffer_count + 1);
-	}
-
-	command_buffer_queue[command_buffer_count] = (VkCommandBuffer)p_command_buffer.id;
-	command_buffer_count++;
+	command_buffers.push_back(VkCommandBuffer(p_command_buffer.id));
 }
 
-void VulkanContext::flush(bool p_flush_setup, bool p_flush_pending) {
-	// Ensure everything else pending is executed.
-	vkDeviceWaitIdle(device);
+void VulkanContext::flush(bool p_flush_command_buffers) {
+	_device_wait_idle(device);
 
-	// Flush the pending setup buffer.
-
-	bool setup_flushable = p_flush_setup && command_buffer_queue[0];
-	bool pending_flushable = p_flush_pending && command_buffer_count > 1;
-
-	if (setup_flushable) {
-		// Use a fence to wait for everything done.
-		VkSubmitInfo submit_info;
-		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submit_info.pNext = nullptr;
-		submit_info.pWaitDstStageMask = nullptr;
-		submit_info.waitSemaphoreCount = 0;
-		submit_info.pWaitSemaphores = nullptr;
-		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = command_buffer_queue.ptr();
-		submit_info.signalSemaphoreCount = pending_flushable ? 1 : 0;
-		submit_info.pSignalSemaphores = pending_flushable ? &draw_complete_semaphores[frame_index] : nullptr;
-		VkResult err = vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
-		command_buffer_queue[0] = nullptr;
-		ERR_FAIL_COND(err);
+	if (p_flush_command_buffers) {
+		submit_graphics_queue(VK_NULL_HANDLE, VK_NULL_HANDLE);
 	}
 
-	if (pending_flushable) {
-		// Use a fence to wait for everything to finish.
-
-		VkSubmitInfo submit_info;
-		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submit_info.pNext = nullptr;
-		VkPipelineStageFlags wait_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		submit_info.pWaitDstStageMask = setup_flushable ? &wait_stage_mask : nullptr;
-		submit_info.waitSemaphoreCount = setup_flushable ? 1 : 0;
-		submit_info.pWaitSemaphores = setup_flushable ? &draw_complete_semaphores[frame_index] : nullptr;
-		submit_info.commandBufferCount = command_buffer_count - 1;
-		submit_info.pCommandBuffers = command_buffer_queue.ptr() + 1;
-		submit_info.signalSemaphoreCount = 0;
-		submit_info.pSignalSemaphores = nullptr;
-		VkResult err = vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
-		command_buffer_count = 1;
-		ERR_FAIL_COND(err);
-	}
-
-	vkDeviceWaitIdle(device);
+	_device_wait_idle(device);
 }
 
 Error VulkanContext::prepare_buffers(RDD::CommandBufferID p_command_buffer) {
@@ -2525,58 +2515,27 @@ Error VulkanContext::swap_buffers() {
 	// engine has fully released ownership to the application, and it is
 	// okay to render to the image.
 
-	const VkCommandBuffer *commands_ptr = nullptr;
-	uint32_t commands_to_submit = 0;
-
-	if (command_buffer_queue[0] == nullptr) {
-		// No setup command, but commands to submit, submit from the first and skip command.
-		if (command_buffer_count > 1) {
-			commands_ptr = command_buffer_queue.ptr() + 1;
-			commands_to_submit = command_buffer_count - 1;
-		}
-	} else {
-		commands_ptr = command_buffer_queue.ptr();
-		commands_to_submit = command_buffer_count;
-	}
-
-	VkSemaphore *semaphores_to_acquire = (VkSemaphore *)alloca(windows.size() * sizeof(VkSemaphore));
-	VkPipelineStageFlags *pipe_stage_flags = (VkPipelineStageFlags *)alloca(windows.size() * sizeof(VkPipelineStageFlags));
-	uint32_t semaphores_to_acquire_count = 0;
-
 	for (KeyValue<int, Window> &E : windows) {
 		Window *w = &E.value;
-
 		if (w->semaphore_acquired) {
-			semaphores_to_acquire[semaphores_to_acquire_count] = w->image_acquired_semaphores[frame_index];
-			pipe_stage_flags[semaphores_to_acquire_count] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			semaphores_to_acquire_count++;
+			command_wait_semaphores.push_back(w->image_acquired_semaphores[frame_index]);
+			command_wait_semaphores_stage_masks.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 		}
 	}
 
-	VkSubmitInfo submit_info;
-	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submit_info.pNext = nullptr;
-	submit_info.waitSemaphoreCount = semaphores_to_acquire_count;
-	submit_info.pWaitSemaphores = semaphores_to_acquire;
-	submit_info.pWaitDstStageMask = pipe_stage_flags;
-	submit_info.commandBufferCount = commands_to_submit;
-	submit_info.pCommandBuffers = commands_ptr;
-	submit_info.signalSemaphoreCount = 1;
-	submit_info.pSignalSemaphores = &draw_complete_semaphores[frame_index];
-	err = vkQueueSubmit(graphics_queue, 1, &submit_info, fences[frame_index]);
-	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "Vulkan: Cannot submit graphics queue. Error code: " + String(string_VkResult(err)));
+	submit_graphics_queue(fences[frame_index], draw_complete_semaphores[frame_index]);
 
-	command_buffer_queue[0] = nullptr;
-	command_buffer_count = 1;
-
-	if (separate_present_queue) {
+	if (separate_present_queue()) {
 		// If we are using separate queues, change image ownership to the
 		// present queue before presenting, waiting for the draw complete
 		// semaphore and signaling the ownership released semaphore when finished.
-		VkFence nullFence = VK_NULL_HANDLE;
-		pipe_stage_flags[0] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		VkSubmitInfo submit_info;
+		VkPipelineStageFlags wait_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.pNext = nullptr;
 		submit_info.waitSemaphoreCount = 1;
 		submit_info.pWaitSemaphores = &draw_complete_semaphores[frame_index];
+		submit_info.pWaitDstStageMask = &wait_stage_mask;
 		submit_info.commandBufferCount = 0;
 
 		VkCommandBuffer *cmdbufptr = (VkCommandBuffer *)alloca(sizeof(VkCommandBuffer *) * windows.size());
@@ -2594,7 +2553,7 @@ Error VulkanContext::swap_buffers() {
 
 		submit_info.signalSemaphoreCount = 1;
 		submit_info.pSignalSemaphores = &image_ownership_semaphores[frame_index];
-		err = vkQueueSubmit(present_queue, 1, &submit_info, nullFence);
+		err = vkQueueSubmit(present_queue, 1, &submit_info, VK_NULL_HANDLE);
 		ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "Vulkan: Cannot submit present queue. Error code: " + String(string_VkResult(err)));
 	}
 
@@ -2604,7 +2563,7 @@ Error VulkanContext::swap_buffers() {
 		/*sType*/ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		/*pNext*/ nullptr,
 		/*waitSemaphoreCount*/ 1,
-		/*pWaitSemaphores*/ (separate_present_queue) ? &image_ownership_semaphores[frame_index] : &draw_complete_semaphores[frame_index],
+		/*pWaitSemaphores*/ (separate_present_queue()) ? &image_ownership_semaphores[frame_index] : &draw_complete_semaphores[frame_index],
 		/*swapchainCount*/ 0,
 		/*pSwapchain*/ nullptr,
 		/*pImageIndices*/ nullptr,
@@ -2695,8 +2654,17 @@ Error VulkanContext::swap_buffers() {
 		}
 	}
 #endif
-	//	print_line("current buffer:  " + itos(current_buffer));
+
+	const bool use_transfer_mutex = !separate_transfer_queue();
+	if (use_transfer_mutex) {
+		transfer_queue_mutex.lock();
+	}
+
 	err = fpQueuePresentKHR(present_queue, &present);
+
+	if (use_transfer_mutex) {
+		transfer_queue_mutex.unlock();
+	}
 
 	frame_index += 1;
 	frame_index %= FRAME_LAG;
@@ -2747,6 +2715,111 @@ VkQueue VulkanContext::get_graphics_queue() const {
 
 uint32_t VulkanContext::get_graphics_queue_family_index() const {
 	return graphics_queue_family_index;
+}
+
+uint32_t VulkanContext::get_transfer_queue_family_index() const {
+	return transfer_queue_family_index;
+}
+
+bool VulkanContext::separate_present_queue() const {
+	return present_queue_family_index != graphics_queue_family_index;
+}
+
+bool VulkanContext::separate_transfer_queue() const {
+	return transfer_queue_family_index != graphics_queue_family_index;
+}
+
+VkFence VulkanContext::fence_create() {
+	VkFence fence;
+	VkFenceCreateInfo create_info;
+	create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	create_info.pNext = nullptr;
+	create_info.flags = 0;
+	VkResult err = vkCreateFence(device, &create_info, nullptr, &fence);
+	ERR_FAIL_COND_V(err, VK_NULL_HANDLE);
+	return fence;
+}
+
+void VulkanContext::fence_wait(VkFence p_fence) {
+	vkWaitForFences(device, 1, &p_fence, VK_TRUE, UINT64_MAX);
+}
+
+void VulkanContext::fence_reset(VkFence p_fence) {
+	vkResetFences(device, 1, &p_fence);
+}
+
+void VulkanContext::fence_free(VkFence p_fence) {
+	vkDestroyFence(device, p_fence, nullptr);
+}
+
+VkSemaphore VulkanContext::semaphore_create() {
+	VkSemaphore semaphore;
+	VkSemaphoreCreateInfo create_info;
+	create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	create_info.pNext = nullptr;
+	create_info.flags = 0;
+	VkResult err = vkCreateSemaphore(device, &create_info, nullptr, &semaphore);
+	ERR_FAIL_COND_V(err, VK_NULL_HANDLE);
+	return semaphore;
+}
+
+void VulkanContext::semaphore_free(VkSemaphore p_semaphore) {
+	vkDestroySemaphore(device, p_semaphore, nullptr);
+}
+
+void VulkanContext::submit_transfer_queue(RDD::CommandBufferID p_cmd_buffer, VkFence p_fence, VkSemaphore p_semaphore) {
+	MutexLock lock(transfer_queue_mutex);
+	VkCommandBuffer command_buffer = VkCommandBuffer(p_cmd_buffer.id);
+	VkSubmitInfo submit_info;
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.pNext = nullptr;
+	submit_info.waitSemaphoreCount = 0;
+	submit_info.pWaitSemaphores = nullptr;
+	submit_info.pWaitDstStageMask = nullptr;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = &command_buffer;
+	submit_info.signalSemaphoreCount = (p_semaphore != VK_NULL_HANDLE) ? 1 : 0;
+	submit_info.pSignalSemaphores = &p_semaphore;
+	vkQueueSubmit(transfer_queues[transfer_queue_index], 1, &submit_info, p_fence);
+
+	// Keep switching the transfer queue we submit commands to.
+	transfer_queue_index = (transfer_queue_index + 1) % transfer_queues.size();
+}
+
+Error VulkanContext::submit_graphics_queue(VkFence p_fence, VkSemaphore p_semaphore) {
+	const bool use_transfer_mutex = !separate_transfer_queue();
+	VkSubmitInfo submit_info;
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.pNext = nullptr;
+	submit_info.waitSemaphoreCount = command_wait_semaphores.size();
+	submit_info.pWaitSemaphores = command_wait_semaphores.ptr();
+	submit_info.pWaitDstStageMask = command_wait_semaphores_stage_masks.ptr();
+	submit_info.commandBufferCount = command_buffers.size();
+	submit_info.pCommandBuffers = command_buffers.ptr();
+	submit_info.signalSemaphoreCount = p_semaphore != VK_NULL_HANDLE ? 1 : 0;
+	submit_info.pSignalSemaphores = p_semaphore != VK_NULL_HANDLE ? &p_semaphore : nullptr;
+
+	if (use_transfer_mutex) {
+		transfer_queue_mutex.lock();
+	}
+
+	VkResult err = vkQueueSubmit(graphics_queue, 1, &submit_info, p_fence);
+
+	if (use_transfer_mutex) {
+		transfer_queue_mutex.unlock();
+	}
+
+	command_buffers.clear();
+	command_wait_semaphores.clear();
+	command_wait_semaphores_stage_masks.clear();
+	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "Vulkan: Cannot submit graphics queue. Error code: " + String(string_VkResult(err)));
+
+	return OK;
+}
+
+void VulkanContext::append_command_wait_semaphore(VkSemaphore p_semaphore, VkPipelineStageFlags p_stage_mask) {
+	command_wait_semaphores.push_back(p_semaphore);
+	command_wait_semaphores_stage_masks.push_back(p_stage_mask);
 }
 
 VkFormat VulkanContext::get_screen_format() const {
@@ -2807,7 +2880,7 @@ void VulkanContext::local_device_sync(RID p_local_device) {
 	LocalDevice *ld = local_device_owner.get_or_null(p_local_device);
 	ERR_FAIL_COND(!ld->waiting);
 
-	vkDeviceWaitIdle(ld->device);
+	_device_wait_idle(ld->device);
 	ld->waiting = false;
 }
 
@@ -2878,8 +2951,7 @@ bool VulkanContext::is_debug_utils_enabled() const {
 }
 
 VulkanContext::VulkanContext() {
-	command_buffer_queue.resize(1); // First one is always the setup command.
-	command_buffer_queue[0] = nullptr;
+	// Empty constructor.
 }
 
 VulkanContext::~VulkanContext() {
@@ -2893,7 +2965,7 @@ VulkanContext::~VulkanContext() {
 		for (uint32_t i = 0; i < FRAME_LAG; i++) {
 			vkDestroyFence(device, fences[i], nullptr);
 			vkDestroySemaphore(device, draw_complete_semaphores[i], nullptr);
-			if (separate_present_queue) {
+			if (separate_present_queue()) {
 				vkDestroySemaphore(device, image_ownership_semaphores[i], nullptr);
 			}
 		}

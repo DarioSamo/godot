@@ -186,7 +186,9 @@ TextureStorage::TextureStorage() {
 			}
 
 			Vector<Vector<uint8_t>> vpv;
-			vpv.push_back(sv);
+			/// not allowed on transfer queue
+			///vpv.push_back(sv);
+			///
 			default_rd_textures[DEFAULT_RD_TEXTURE_DEPTH] = RD::get_singleton()->texture_create(tf, RD::TextureView(), vpv);
 		}
 
@@ -461,7 +463,7 @@ TextureStorage::TextureStorage() {
 
 		{
 			Vector<Vector<uint8_t>> vsv;
-			vsv.push_back(sv);
+			///vsv.push_back(sv);
 			default_rd_textures[DEFAULT_RD_TEXTURE_2D_ARRAY_DEPTH] = RD::get_singleton()->texture_create(tformat, RD::TextureView(), vsv);
 		}
 	}

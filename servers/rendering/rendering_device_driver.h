@@ -342,12 +342,17 @@ public:
 
 	// ----- POOL -----
 
+	enum CommandQueueType {
+		COMMAND_QUEUE_TYPE_GRAPHICS,
+		COMMAND_QUEUE_TYPE_TRANSFER
+	};
+
 	enum CommandBufferType {
 		COMMAND_BUFFER_TYPE_PRIMARY,
 		COMMAND_BUFFER_TYPE_SECONDARY,
 	};
 
-	virtual CommandPoolID command_pool_create(CommandBufferType p_cmd_buffer_type) = 0;
+	virtual CommandPoolID command_pool_create(CommandQueueType p_cmd_queue_type, CommandBufferType p_cmd_buffer_type) = 0;
 	virtual void command_pool_free(CommandPoolID p_cmd_pool) = 0;
 
 	// ----- BUFFER -----

@@ -1148,7 +1148,7 @@ void RenderingDeviceGraph::initialize(RDD *p_driver, uint32_t p_frame_count, uin
 
 		for (uint32_t j = 0; j < p_secondary_command_buffers_per_frame; j++) {
 			SecondaryCommandBuffer &secondary = frames[i].secondary_command_buffers[j];
-			secondary.command_pool = driver->command_pool_create(RDD::COMMAND_BUFFER_TYPE_SECONDARY);
+			secondary.command_pool = driver->command_pool_create(RDD::COMMAND_QUEUE_TYPE_GRAPHICS, RDD::COMMAND_BUFFER_TYPE_SECONDARY);
 			secondary.command_buffer = driver->command_buffer_create(RDD::COMMAND_BUFFER_TYPE_SECONDARY, secondary.command_pool);
 			secondary.task = WorkerThreadPool::INVALID_TASK_ID;
 		}

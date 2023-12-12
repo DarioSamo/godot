@@ -168,7 +168,7 @@ private:
 public:
 	// ----- POOL -----
 
-	virtual CommandPoolID command_pool_create(CommandBufferType p_cmd_buffer_type) override final;
+	virtual CommandPoolID command_pool_create(CommandQueueType p_cmd_queue_type, CommandBufferType p_cmd_buffer_type) override final;
 	virtual void command_pool_free(CommandPoolID p_cmd_pool) override final;
 
 	// ----- BUFFER -----

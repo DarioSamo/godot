@@ -1735,7 +1735,7 @@ void RenderingDeviceDriverD3D12::command_pipeline_barrier(
 
 // ----- POOL -----
 
-RDD::CommandPoolID RenderingDeviceDriverD3D12::command_pool_create(CommandBufferType p_cmd_buffer_type) {
+RDD::CommandPoolID RenderingDeviceDriverD3D12::command_pool_create(CommandQueueType p_cmd_queue_type, CommandBufferType p_cmd_buffer_type) {
 	last_command_pool_id.id++;
 	return last_command_pool_id;
 }

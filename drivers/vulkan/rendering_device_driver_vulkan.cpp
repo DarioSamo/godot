@@ -1078,11 +1078,21 @@ void RenderingDeviceDriverVulkan::command_pipeline_barrier(
 
 // ----- POOL -----
 
-RDD::CommandPoolID RenderingDeviceDriverVulkan::command_pool_create(CommandBufferType p_cmd_buffer_type) {
+RDD::CommandPoolID RenderingDeviceDriverVulkan::command_pool_create(CommandQueueType p_cmd_queue_type, CommandBufferType p_cmd_buffer_type) {
 	VkCommandPoolCreateInfo cmd_pool_info = {};
 	cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cmd_pool_info.queueFamilyIndex = context->get_graphics_queue_family_index();
 	cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	switch (p_cmd_queue_type) {
+		case COMMAND_QUEUE_TYPE_GRAPHICS:
+			cmd_pool_info.queueFamilyIndex = context->get_graphics_queue_family_index();
+			break;
+		case COMMAND_QUEUE_TYPE_TRANSFER:
+			cmd_pool_info.queueFamilyIndex = context->get_transfer_queue_family_index();
+			break;
+		default:
+			ERR_FAIL_V_MSG(CommandPoolID(), "Unknown command queue type.");
+	}
 
 	VkCommandPool vk_cmd_pool = VK_NULL_HANDLE;
 	VkResult res = vkCreateCommandPool(vk_device, &cmd_pool_info, nullptr, &vk_cmd_pool);
@@ -3287,6 +3297,8 @@ uint64_t RenderingDeviceDriverVulkan::limit_get(Limit p_limit) {
 
 uint64_t RenderingDeviceDriverVulkan::api_trait_get(ApiTrait p_trait) {
 	switch (p_trait) {
+		case API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT:
+			return (uint64_t)4;
 		case API_TRAIT_SHADER_CHANGE_INVALIDATION:
 			return (uint64_t)SHADER_CHANGE_INVALIDATION_INCOMPATIBLE_SETS_PLUS_CASCADE;
 		default:

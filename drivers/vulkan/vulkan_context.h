@@ -122,13 +122,15 @@ private:
 
 	bool buffers_prepared = false;
 
-	// Present queue.
 	bool queues_initialized = false;
 	uint32_t graphics_queue_family_index = UINT32_MAX;
+	uint32_t transfer_queue_family_index = UINT32_MAX;
 	uint32_t present_queue_family_index = UINT32_MAX;
-	bool separate_present_queue = false;
 	VkQueue graphics_queue = VK_NULL_HANDLE;
 	VkQueue present_queue = VK_NULL_HANDLE;
+	LocalVector<VkQueue> transfer_queues;
+	uint32_t transfer_queue_index = 0;
+	BinaryMutex transfer_queue_mutex;
 	VkColorSpaceKHR color_space;
 	VkFormat format;
 	VkSemaphore draw_complete_semaphores[FRAME_LAG];
@@ -175,11 +177,9 @@ private:
 	uint32_t swapchainImageCount = 0;
 
 	// Commands.
-
-	bool prepared = false;
-
-	LocalVector<VkCommandBuffer> command_buffer_queue;
-	uint32_t command_buffer_count = 1;
+	LocalVector<VkCommandBuffer> command_buffers;
+	LocalVector<VkSemaphore> command_wait_semaphores;
+	LocalVector<VkPipelineStageFlags> command_wait_semaphores_stage_masks;
 
 	// Extensions.
 	static bool instance_extensions_initialized;
@@ -255,6 +255,8 @@ private:
 	Error _create_swap_chain();
 	Error _create_semaphores();
 
+	void _device_wait_idle(VkDevice p_device);
+
 	Vector<VkAttachmentReference> _convert_VkAttachmentReference2(uint32_t p_count, const VkAttachmentReference2 *p_refs);
 
 protected:
@@ -289,6 +291,18 @@ public:
 	virtual int get_swapchain_image_count() const override final;
 	VkQueue get_graphics_queue() const;
 	uint32_t get_graphics_queue_family_index() const;
+	uint32_t get_transfer_queue_family_index() const;
+	bool separate_present_queue() const;
+	bool separate_transfer_queue() const;
+	VkFence fence_create();
+	void fence_wait(VkFence p_fence);
+	void fence_reset(VkFence p_fence);
+	void fence_free(VkFence p_fence);
+	VkSemaphore semaphore_create();
+	void semaphore_free(VkSemaphore p_semaphore);
+	void submit_transfer_queue(RDD::CommandBufferID p_cmd_buffer, VkFence p_fence, VkSemaphore p_semaphore);
+	Error submit_graphics_queue(VkFence p_fence, VkSemaphore p_semaphore);
+	void append_command_wait_semaphore(VkSemaphore p_semaphore, VkPipelineStageFlags p_stage_mask);
 
 	static void set_vulkan_hooks(VulkanHooks *p_vulkan_hooks) { vulkan_hooks = p_vulkan_hooks; };
 
@@ -318,10 +332,9 @@ public:
 	VkFormat get_screen_format() const;
 	const VkPhysicalDeviceLimits &get_device_limits() const;
 
-	virtual void set_setup_buffer(RDD::CommandBufferID p_command_buffer) override final;
 	virtual void append_command_buffer(RDD::CommandBufferID p_command_buffer) override final;
 	void resize_notify();
-	virtual void flush(bool p_flush_setup = false, bool p_flush_pending = false) override final;
+	virtual void flush(bool p_flush_command_buffers) override final;
 	virtual Error prepare_buffers(RDD::CommandBufferID p_command_buffer) override final;
 	virtual void postpare_buffers(RDD::CommandBufferID p_command_buffer) override final;
 	virtual Error swap_buffers() override final;
