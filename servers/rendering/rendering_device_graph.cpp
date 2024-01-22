@@ -163,7 +163,8 @@ void RenderingDeviceGraph::_add_adjacent_command(int32_t p_previous_command_inde
 	const uint32_t previous_command_data_offset = command_data_offsets[p_previous_command_index];
 	RecordedCommand &previous_command = *reinterpret_cast<RecordedCommand *>(&command_data[previous_command_data_offset]);
 	previous_command.adjacent_command_list_index = _add_to_command_list(p_command_index, previous_command.adjacent_command_list_index);
-	r_command->src_stages = r_command->src_stages | previous_command.dst_stages;
+	previous_command.next_stages = previous_command.next_stages | r_command->self_stages;
+	r_command->previous_stages = r_command->previous_stages | previous_command.self_stages;
 }
 
 int32_t RenderingDeviceGraph::_add_to_write_list(int32_t p_command_index, Rect2i suberesources, int32_t p_list_index) {
@@ -203,6 +204,9 @@ RenderingDeviceGraph::ComputeListInstruction *RenderingDeviceGraph::_allocate_co
 }
 
 void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_trackers, ResourceUsage *p_resource_usages, uint32_t p_resource_count, int32_t p_command_index, RecordedCommand *r_command) {
+	// Assign the next stages derived from the stages the command requires first.
+	r_command->next_stages = r_command->self_stages;
+
 	if (command_label_index >= 0) {
 		// If a label is active, tag the command with the label.
 		r_command->label_index = command_label_index;
@@ -914,8 +918,8 @@ void RenderingDeviceGraph::_group_barriers_for_render_commands(RDD::CommandBuffe
 		const RecordedCommand *command = reinterpret_cast<RecordedCommand *>(&command_data[command_data_offset]);
 
 		// Merge command's stage bits with the barrier group.
-		barrier_group.src_stages = barrier_group.src_stages | command->src_stages;
-		barrier_group.dst_stages = barrier_group.dst_stages | command->dst_stages;
+		barrier_group.src_stages = barrier_group.src_stages | command->previous_stages;
+		barrier_group.dst_stages = barrier_group.dst_stages | command->next_stages;
 
 		// Merge command's memory barrier bits with the barrier group.
 		barrier_group.memory_barrier.src_access = barrier_group.memory_barrier.src_access | command->memory_barrier.src_access;
@@ -1225,7 +1229,7 @@ void RenderingDeviceGraph::add_buffer_clear(RDD::BufferID p_dst, ResourceTracker
 	int32_t command_index;
 	RecordedBufferClearCommand *command = static_cast<RecordedBufferClearCommand *>(_allocate_command(sizeof(RecordedBufferClearCommand), command_index));
 	command->type = RecordedCommand::TYPE_BUFFER_CLEAR;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->buffer = p_dst;
 	command->offset = p_offset;
 	command->size = p_size;
@@ -1241,7 +1245,7 @@ void RenderingDeviceGraph::add_buffer_copy(RDD::BufferID p_src, ResourceTracker 
 	int32_t command_index;
 	RecordedBufferCopyCommand *command = static_cast<RecordedBufferCopyCommand *>(_allocate_command(sizeof(RecordedBufferCopyCommand), command_index));
 	command->type = RecordedCommand::TYPE_BUFFER_COPY;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->source = p_src;
 	command->destination = p_dst;
 	command->region = p_region;
@@ -1256,7 +1260,7 @@ void RenderingDeviceGraph::add_buffer_get_data(RDD::BufferID p_src, ResourceTrac
 	int32_t command_index;
 	RecordedBufferGetDataCommand *command = static_cast<RecordedBufferGetDataCommand *>(_allocate_command(sizeof(RecordedBufferGetDataCommand), command_index));
 	command->type = RecordedCommand::TYPE_BUFFER_GET_DATA;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->source = p_src;
 	command->destination = p_dst;
 	command->region = p_region;
@@ -1277,7 +1281,7 @@ void RenderingDeviceGraph::add_buffer_update(RDD::BufferID p_dst, ResourceTracke
 	int32_t command_index;
 	RecordedBufferUpdateCommand *command = static_cast<RecordedBufferUpdateCommand *>(_allocate_command(command_size, command_index));
 	command->type = RecordedCommand::TYPE_BUFFER_UPDATE;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->destination = p_dst;
 	command->buffer_copies_count = p_buffer_copies.size();
 
@@ -1369,7 +1373,7 @@ void RenderingDeviceGraph::add_compute_list_end() {
 	uint32_t command_size = sizeof(RecordedComputeListCommand) + instruction_data_size;
 	RecordedComputeListCommand *command = static_cast<RecordedComputeListCommand *>(_allocate_command(command_size, command_index));
 	command->type = RecordedCommand::TYPE_COMPUTE_LIST;
-	command->dst_stages = compute_instruction_list.stages;
+	command->self_stages = compute_instruction_list.stages;
 	command->instruction_data_size = instruction_data_size;
 	memcpy(command->instruction_data(), compute_instruction_list.data.ptr(), instruction_data_size);
 	_add_command_to_graph(compute_instruction_list.command_trackers.ptr(), compute_instruction_list.command_tracker_usages.ptr(), compute_instruction_list.command_trackers.size(), command_index, command);
@@ -1579,7 +1583,7 @@ void RenderingDeviceGraph::add_draw_list_end() {
 	uint32_t command_size = sizeof(RecordedDrawListCommand) + clear_values_size + instruction_data_size;
 	RecordedDrawListCommand *command = static_cast<RecordedDrawListCommand *>(_allocate_command(command_size, command_index));
 	command->type = RecordedCommand::TYPE_DRAW_LIST;
-	command->dst_stages = draw_instruction_list.stages;
+	command->self_stages = draw_instruction_list.stages;
 	command->instruction_data_size = instruction_data_size;
 	command->render_pass = draw_instruction_list.render_pass;
 	command->framebuffer = draw_instruction_list.framebuffer;
@@ -1602,7 +1606,7 @@ void RenderingDeviceGraph::add_texture_clear(RDD::TextureID p_dst, ResourceTrack
 	int32_t command_index;
 	RecordedTextureClearCommand *command = static_cast<RecordedTextureClearCommand *>(_allocate_command(sizeof(RecordedTextureClearCommand), command_index));
 	command->type = RecordedCommand::TYPE_TEXTURE_CLEAR;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->texture = p_dst;
 	command->color = p_color;
 	command->range = p_range;
@@ -1618,7 +1622,7 @@ void RenderingDeviceGraph::add_texture_copy(RDD::TextureID p_src, ResourceTracke
 	int32_t command_index;
 	RecordedTextureCopyCommand *command = static_cast<RecordedTextureCopyCommand *>(_allocate_command(sizeof(RecordedTextureCopyCommand), command_index));
 	command->type = RecordedCommand::TYPE_TEXTURE_COPY;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->from_texture = p_src;
 	command->to_texture = p_dst;
 	command->region = p_region;
@@ -1635,7 +1639,7 @@ void RenderingDeviceGraph::add_texture_get_data(RDD::TextureID p_src, ResourceTr
 	uint64_t command_size = sizeof(RecordedTextureGetDataCommand) + p_buffer_texture_copy_regions.size() * sizeof(RDD::BufferTextureCopyRegion);
 	RecordedTextureGetDataCommand *command = static_cast<RecordedTextureGetDataCommand *>(_allocate_command(command_size, command_index));
 	command->type = RecordedCommand::TYPE_TEXTURE_GET_DATA;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->from_texture = p_src;
 	command->to_buffer = p_dst;
 	command->buffer_texture_copy_regions_count = p_buffer_texture_copy_regions.size();
@@ -1656,7 +1660,7 @@ void RenderingDeviceGraph::add_texture_resolve(RDD::TextureID p_src, ResourceTra
 	int32_t command_index;
 	RecordedTextureResolveCommand *command = static_cast<RecordedTextureResolveCommand *>(_allocate_command(sizeof(RecordedTextureResolveCommand), command_index));
 	command->type = RecordedCommand::TYPE_TEXTURE_RESOLVE;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->from_texture = p_src;
 	command->to_texture = p_dst;
 	command->src_layer = p_src_layer;
@@ -1676,7 +1680,7 @@ void RenderingDeviceGraph::add_texture_update(RDD::TextureID p_dst, ResourceTrac
 	uint64_t command_size = sizeof(RecordedTextureUpdateCommand) + p_buffer_copies.size() * sizeof(RecordedBufferToTextureCopy);
 	RecordedTextureUpdateCommand *command = static_cast<RecordedTextureUpdateCommand *>(_allocate_command(command_size, command_index));
 	command->type = RecordedCommand::TYPE_TEXTURE_UPDATE;
-	command->dst_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
+	command->self_stages = RDD::PIPELINE_STAGE_TRANSFER_BIT;
 	command->to_texture = p_dst;
 	command->buffer_to_texture_copies_count = p_buffer_copies.size();
 
@@ -1693,7 +1697,7 @@ void RenderingDeviceGraph::add_capture_timestamp(RDD::QueryPoolID p_query_pool, 
 	int32_t command_index;
 	RecordedCaptureTimestampCommand *command = static_cast<RecordedCaptureTimestampCommand *>(_allocate_command(sizeof(RecordedCaptureTimestampCommand), command_index));
 	command->type = RecordedCommand::TYPE_CAPTURE_TIMESTAMP;
-	command->dst_stages = 0;
+	command->self_stages = 0;
 	command->pool = p_query_pool;
 	command->index = p_index;
 	_add_command_to_graph(nullptr, nullptr, 0, command_index, command);

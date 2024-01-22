@@ -112,8 +112,9 @@ public:
 		int32_t buffer_barrier_count = 0;
 #endif
 		int32_t label_index = -1;
-		BitField<RDD::PipelineStageBits> src_stages;
-		BitField<RDD::PipelineStageBits> dst_stages;
+		BitField<RDD::PipelineStageBits> previous_stages;
+		BitField<RDD::PipelineStageBits> next_stages;
+		BitField<RDD::PipelineStageBits> self_stages;
 	};
 
 	struct RecordedBufferCopy {
