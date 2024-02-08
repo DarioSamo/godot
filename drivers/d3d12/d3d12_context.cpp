@@ -1041,7 +1041,13 @@ void D3D12Context::local_device_push_command_buffers(RID p_local_device, const R
 	LocalDevice *ld = local_device_owner.get_or_null(p_local_device);
 	ERR_FAIL_COND(ld->waiting);
 
-	ld->queue->ExecuteCommandLists(p_count, (ID3D12CommandList *const *)p_buffers);
+	ID3D12CommandList **command_lists = (ID3D12CommandList **)alloca(p_count * sizeof(ID3D12CommandList *));
+	for (int i = 0; i < p_count; i++) {
+		const RenderingDeviceDriverD3D12::CommandBufferInfo *cmd_buf_info = (const RenderingDeviceDriverD3D12::CommandBufferInfo *)p_buffers[i].id;
+		command_lists[i] = cmd_buf_info->cmd_list.Get();
+	}
+
+	ld->queue->ExecuteCommandLists(p_count, command_lists);
 
 	ld->waiting = true;
 }
