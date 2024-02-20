@@ -1502,6 +1502,10 @@ MaterialStorage::~MaterialStorage() {
 	singleton = nullptr;
 }
 
+bool MaterialStorage::can_create_resources_async() const {
+	return false;
+}
+
 /* GLOBAL SHADER UNIFORM API */
 
 int32_t MaterialStorage::_global_shader_uniform_allocate(uint32_t p_elements) {

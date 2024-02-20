@@ -38,6 +38,8 @@ class RendererMaterialStorage {
 public:
 	virtual ~RendererMaterialStorage(){};
 
+	virtual bool can_create_resources_async() const = 0;
+
 	/* GLOBAL SHADER UNIFORM API */
 	virtual void global_shader_parameter_add(const StringName &p_name, RS::GlobalShaderParameterType p_type, const Variant &p_value) = 0;
 	virtual void global_shader_parameter_remove(const StringName &p_name) = 0;

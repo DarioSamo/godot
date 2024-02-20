@@ -254,6 +254,14 @@ uint64_t RenderingServerDefault::get_rendering_info(RenderingInfo p_info) {
 		return RSG::viewport->get_total_primitives_drawn();
 	} else if (p_info == RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME) {
 		return RSG::viewport->get_total_draw_calls_used();
+	} else if (p_info == RENDERING_INFO_PIPELINE_COMPILATIONS_MESH) {
+		return RSG::scene->get_pipeline_compilations(PIPELINE_SOURCE_MESH);
+	} else if (p_info == RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE) {
+		return RSG::scene->get_pipeline_compilations(PIPELINE_SOURCE_SURFACE);
+	} else if (p_info == RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW) {
+		return RSG::scene->get_pipeline_compilations(PIPELINE_SOURCE_DRAW);
+	} else if (p_info == RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION) {
+		return RSG::scene->get_pipeline_compilations(PIPELINE_SOURCE_SPECIALIZATION);
 	}
 	return RSG::utilities->get_rendering_info(p_info);
 }

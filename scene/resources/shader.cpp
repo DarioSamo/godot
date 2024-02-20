@@ -41,6 +41,13 @@ Shader::Mode Shader::get_mode() const {
 	return mode;
 }
 
+void Shader::_check_shader_rid() const {
+	if (shader_rid.is_null() && !pp_code.is_empty()) {
+		shader_rid = RenderingServer::get_singleton()->shader_create_from_code(pp_code, get_path());
+		pp_code = String();
+	}
+}
+
 void Shader::_dependency_changed() {
 	// Preprocess and compile the code again because a dependency has changed. It also calls emit_changed() for us.
 	_recompile();
@@ -52,7 +59,10 @@ void Shader::_recompile() {
 
 void Shader::set_path(const String &p_path, bool p_take_over) {
 	Resource::set_path(p_path, p_take_over);
-	RS::get_singleton()->shader_set_path_hint(shader, p_path);
+
+	if (shader_rid.is_valid()) {
+		RS::get_singleton()->shader_set_path_hint(shader_rid, p_path);
+	}
 }
 
 void Shader::set_include_path(const String &p_path) {
@@ -67,7 +77,7 @@ void Shader::set_code(const String &p_code) {
 	}
 
 	code = p_code;
-	String pp_code = p_code;
+	pp_code = p_code;
 
 	{
 		String path = get_path();
@@ -105,7 +115,10 @@ void Shader::set_code(const String &p_code) {
 		E->connect_changed(callable_mp(this, &Shader::_dependency_changed));
 	}
 
-	RenderingServer::get_singleton()->shader_set_code(shader, pp_code);
+	if (shader_rid.is_valid()) {
+		RenderingServer::get_singleton()->shader_set_code(shader_rid, pp_code);
+		pp_code = String();
+	}
 
 	emit_changed();
 }
@@ -117,9 +130,10 @@ String Shader::get_code() const {
 
 void Shader::get_shader_uniform_list(List<PropertyInfo> *p_params, bool p_get_groups) const {
 	_update_shader();
+	_check_shader_rid();
 
 	List<PropertyInfo> local;
-	RenderingServer::get_singleton()->get_shader_parameter_list(shader, &local);
+	RenderingServer::get_singleton()->get_shader_parameter_list(shader_rid, &local);
 
 	for (PropertyInfo &pi : local) {
 		bool is_group = pi.usage == PROPERTY_USAGE_GROUP || pi.usage == PROPERTY_USAGE_SUBGROUP;
@@ -143,17 +157,20 @@ void Shader::get_shader_uniform_list(List<PropertyInfo> *p_params, bool p_get_gr
 
 RID Shader::get_rid() const {
 	_update_shader();
+	_check_shader_rid();
 
-	return shader;
+	return shader_rid;
 }
 
 void Shader::set_default_texture_parameter(const StringName &p_name, const Ref<Texture2D> &p_texture, int p_index) {
+	_check_shader_rid();
+
 	if (p_texture.is_valid()) {
 		if (!default_textures.has(p_name)) {
 			default_textures[p_name] = HashMap<int, Ref<Texture2D>>();
 		}
 		default_textures[p_name][p_index] = p_texture;
-		RS::get_singleton()->shader_set_default_texture_parameter(shader, p_name, p_texture->get_rid(), p_index);
+		RS::get_singleton()->shader_set_default_texture_parameter(shader_rid, p_name, p_texture->get_rid(), p_index);
 	} else {
 		if (default_textures.has(p_name) && default_textures[p_name].has(p_index)) {
 			default_textures[p_name].erase(p_index);
@@ -162,7 +179,7 @@ void Shader::set_default_texture_parameter(const StringName &p_name, const Ref<T
 				default_textures.erase(p_name);
 			}
 		}
-		RS::get_singleton()->shader_set_default_texture_parameter(shader, p_name, RID(), p_index);
+		RS::get_singleton()->shader_set_default_texture_parameter(shader_rid, p_name, RID(), p_index);
 	}
 
 	emit_changed();
@@ -186,6 +203,7 @@ bool Shader::is_text_shader() const {
 }
 
 void Shader::_update_shader() const {
+	// Base implementation does nothing.
 }
 
 Array Shader::_get_shader_uniform_list(bool p_get_groups) {
@@ -219,12 +237,14 @@ void Shader::_bind_methods() {
 }
 
 Shader::Shader() {
-	shader = RenderingServer::get_singleton()->shader_create();
+	// Shader RID will be empty until it is required.
 }
 
 Shader::~Shader() {
-	ERR_FAIL_NULL(RenderingServer::get_singleton());
-	RenderingServer::get_singleton()->free(shader);
+	if (shader_rid.is_valid()) {
+		ERR_FAIL_NULL(RenderingServer::get_singleton());
+		RenderingServer::get_singleton()->free(shader_rid);
+	}
 }
 
 ////////////

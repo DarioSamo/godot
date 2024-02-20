@@ -35,6 +35,8 @@
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 
+#define PRINT_PIPELINE_COMPILATION_KEYS 0
+
 using namespace RendererSceneRenderImplementation;
 
 /* ShaderData */
@@ -53,10 +55,10 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 
 	ShaderCompiler::GeneratedCode gen_code;
 
-	int blend_mode = BLEND_MODE_MIX;
-	int depth_testi = DEPTH_TEST_ENABLED;
-	int alpha_antialiasing_mode = ALPHA_ANTIALIASING_OFF;
-	int cull = CULL_BACK;
+	blend_mode = BLEND_MODE_MIX;
+	depth_testi = DEPTH_TEST_ENABLED;
+	alpha_antialiasing_mode = ALPHA_ANTIALIASING_OFF;
+	cull_mode = CULL_BACK;
 
 	uses_point_size = false;
 	uses_alpha = false;
@@ -68,8 +70,8 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_roughness = false;
 	uses_normal = false;
 	uses_tangent = false;
-	bool uses_normal_map = false;
-	bool wireframe = false;
+	uses_normal_map = false;
+	wireframe = false;
 
 	unshaded = false;
 	uses_vertex = false;
@@ -101,9 +103,9 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 
 	actions.render_mode_values["depth_test_disabled"] = Pair<int *, int>(&depth_testi, DEPTH_TEST_DISABLED);
 
-	actions.render_mode_values["cull_disabled"] = Pair<int *, int>(&cull, CULL_DISABLED);
-	actions.render_mode_values["cull_front"] = Pair<int *, int>(&cull, CULL_FRONT);
-	actions.render_mode_values["cull_back"] = Pair<int *, int>(&cull, CULL_BACK);
+	actions.render_mode_values["cull_disabled"] = Pair<int *, int>(&cull_mode, CULL_DISABLED);
+	actions.render_mode_values["cull_front"] = Pair<int *, int>(&cull_mode, CULL_FRONT);
+	actions.render_mode_values["cull_back"] = Pair<int *, int>(&cull_mode, CULL_BACK);
 
 	actions.render_mode_flags["unshaded"] = &unshaded;
 	actions.render_mode_flags["wireframe"] = &wireframe;
@@ -140,13 +142,12 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 
 	actions.uniforms = &uniforms;
 
-	SceneShaderForwardMobile *shader_singleton = (SceneShaderForwardMobile *)SceneShaderForwardMobile::singleton;
-
-	Error err = shader_singleton->compiler.compile(RS::SHADER_SPATIAL, code, &actions, path, gen_code);
+	MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
+	Error err = SceneShaderForwardMobile::singleton->compiler.compile(RS::SHADER_SPATIAL, code, &actions, path, gen_code);
 	ERR_FAIL_COND_MSG(err != OK, "Shader compilation failed.");
 
 	if (version.is_null()) {
-		version = shader_singleton->shader.version_create();
+		version = SceneShaderForwardMobile::singleton->shader.version_create();
 	}
 
 	depth_draw = DepthDraw(depth_drawi);
@@ -188,20 +189,76 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	print_line("\n**fragment_globals:\n" + gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT]);
 #endif
 
-	shader_singleton->shader.version_set_code(version, gen_code.code, gen_code.uniforms, gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX], gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT], gen_code.defines);
-	ERR_FAIL_COND(!shader_singleton->shader.version_is_valid(version));
+	SceneShaderForwardMobile::singleton->shader.version_set_code(version, gen_code.code, gen_code.uniforms, gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX], gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT], gen_code.defines);
 
 	ubo_size = gen_code.uniform_total_size;
 	ubo_offsets = gen_code.uniform_offsets;
 	texture_uniforms = gen_code.texture_uniforms;
 
-	//blend modes
+	pipeline_hash_map.clear_pipelines();
+
+	// TODO(Pipeline): Delay validity check until it is actually requested somewhere to not stall for shader compilation.
+	valid = true;
+}
+
+bool SceneShaderForwardMobile::ShaderData::is_animated() const {
+	return (uses_fragment_time && uses_discard) || (uses_vertex_time && uses_vertex);
+}
+
+bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
+	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+	bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
+	bool has_alpha = has_base_alpha || uses_blend_alpha;
+
+	return !has_alpha || (uses_depth_prepass_alpha && !(depth_draw == DEPTH_DRAW_DISABLED || depth_test == DEPTH_TEST_DISABLED));
+}
+
+RS::ShaderNativeSourceCode SceneShaderForwardMobile::ShaderData::get_native_source_code() const {
+	SceneShaderForwardMobile *shader_singleton = (SceneShaderForwardMobile *)SceneShaderForwardMobile::singleton;
+
+	return shader_singleton->shader.version_get_native_source_code(version);
+}
+
+void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeline_key) {
+#if PRINT_PIPELINE_COMPILATION_KEYS
+	// Print extra debugging information.
+	String source_name = "UNKNOWN";
+	switch (p_source) {
+		case RS::PIPELINE_SOURCE_MESH:
+			source_name = "MESH";
+			break;
+		case RS::PIPELINE_SOURCE_SURFACE:
+			source_name = "SURFACE";
+			break;
+		case RS::PIPELINE_SOURCE_DRAW:
+			source_name = "DRAW";
+			break;
+		case RS::PIPELINE_SOURCE_SPECIALIZATION:
+			source_name = "SPECIALIZATION";
+			break;
+	}
+
+	print_line(
+			"SOURCE:", source_name,
+			"HASH:", p_pipeline_key.hash(),
+			"SHADER:", p_pipeline_key.shader,
+			"VERTEX:", p_pipeline_key.vertex_format_id,
+			"FRAMEBUFFER:", p_pipeline_key.framebuffer_format_id,
+			"CULL:", p_pipeline_key.cull_mode,
+			"PRIMITIVE:", p_pipeline_key.primitive_type,
+			"VERSION:", p_pipeline_key.version,
+			"SPEC PACKED #0:", p_pipeline_key.shader_specialization.packed_0,
+			"SPEC PACKED #1:", p_pipeline_key.shader_specialization.packed_1,
+			"RENDER PASS:", p_pipeline_key.render_pass,
+			"WIREFRAME:", p_pipeline_key.wireframe);
+#endif
 
 	// if any form of Alpha Antialiasing is enabled, set the blend mode to alpha to coverage
 	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) {
 		blend_mode = BLEND_MODE_ALPHA_TO_COVERAGE;
 	}
 
+	// TODO: These can be shared betweeen Forward+ and Mobile.
 	RD::PipelineColorBlendState::Attachment blend_attachment;
 
 	switch (blend_mode) {
@@ -275,109 +332,109 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 		depth_stencil_state.enable_depth_write = depth_draw != DEPTH_DRAW_DISABLED ? true : false;
 	}
 
-	for (int i = 0; i < CULL_VARIANT_MAX; i++) {
-		RD::PolygonCullMode cull_mode_rd_table[CULL_VARIANT_MAX][3] = {
-			{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_FRONT, RD::POLYGON_CULL_BACK },
-			{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_BACK, RD::POLYGON_CULL_FRONT },
-			{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_DISABLED }
-		};
+	RD::RenderPrimitive primitive_rd_table[RS::PRIMITIVE_MAX] = {
+		RD::RENDER_PRIMITIVE_POINTS,
+		RD::RENDER_PRIMITIVE_LINES,
+		RD::RENDER_PRIMITIVE_LINESTRIPS,
+		RD::RENDER_PRIMITIVE_TRIANGLES,
+		RD::RENDER_PRIMITIVE_TRIANGLE_STRIPS,
+	};
 
-		RD::PolygonCullMode cull_mode_rd = cull_mode_rd_table[i][cull];
+	RD::RenderPrimitive primitive_rd = uses_point_size ? RD::RENDER_PRIMITIVE_POINTS : primitive_rd_table[p_pipeline_key.primitive_type];
 
-		for (int j = 0; j < RS::PRIMITIVE_MAX; j++) {
-			RD::RenderPrimitive primitive_rd_table[RS::PRIMITIVE_MAX] = {
-				RD::RENDER_PRIMITIVE_POINTS,
-				RD::RENDER_PRIMITIVE_LINES,
-				RD::RENDER_PRIMITIVE_LINESTRIPS,
-				RD::RENDER_PRIMITIVE_TRIANGLES,
-				RD::RENDER_PRIMITIVE_TRIANGLE_STRIPS,
-			};
+	RD::PipelineRasterizationState raster_state;
+	raster_state.cull_mode = p_pipeline_key.cull_mode;
+	raster_state.wireframe = wireframe || p_pipeline_key.wireframe;
 
-			RD::RenderPrimitive primitive_rd = uses_point_size ? RD::RENDER_PRIMITIVE_POINTS : primitive_rd_table[j];
+	RD::PipelineMultisampleState multisample_state;
+	multisample_state.sample_count = RD::get_singleton()->framebuffer_format_get_texture_samples(p_pipeline_key.framebuffer_format_id, 0);
 
-			for (int k = 0; k < SHADER_VERSION_MAX; k++) {
-				if (!static_cast<SceneShaderForwardMobile *>(singleton)->shader.is_variant_enabled(k)) {
-					continue;
-				}
-				RD::PipelineRasterizationState raster_state;
-				raster_state.cull_mode = cull_mode_rd;
-				raster_state.wireframe = wireframe;
+	RD::PipelineColorBlendState blend_state;
+	if (uses_alpha || uses_blend_alpha) {
+		// These flags should only go through if we have some form of MSAA.
+		if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE) {
+			multisample_state.enable_alpha_to_coverage = true;
+		} else if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE) {
+			multisample_state.enable_alpha_to_coverage = true;
+			multisample_state.enable_alpha_to_one = true;
+		}
 
-				RD::PipelineColorBlendState blend_state;
-				RD::PipelineDepthStencilState depth_stencil = depth_stencil_state;
-				RD::PipelineMultisampleState multisample_state;
-
-				if (uses_alpha || uses_blend_alpha) {
-					// only allow these flags to go through if we have some form of msaa
-					if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE) {
-						multisample_state.enable_alpha_to_coverage = true;
-					} else if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE) {
-						multisample_state.enable_alpha_to_coverage = true;
-						multisample_state.enable_alpha_to_one = true;
-					}
-
-					if (k == SHADER_VERSION_COLOR_PASS || k == SHADER_VERSION_COLOR_PASS_MULTIVIEW || k == SHADER_VERSION_LIGHTMAP_COLOR_PASS || k == SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW) {
-						blend_state = blend_state_blend;
-						if (depth_draw == DEPTH_DRAW_OPAQUE && !uses_alpha_clip) {
-							depth_stencil.enable_depth_write = false; //alpha does not draw depth
-						}
-					} else if (k == SHADER_VERSION_SHADOW_PASS || k == SHADER_VERSION_SHADOW_PASS_MULTIVIEW || k == SHADER_VERSION_SHADOW_PASS_DP) {
-						//none, blend state contains nothing
-					} else if (k == SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
-						blend_state = RD::PipelineColorBlendState::create_disabled(5); //writes to normal and roughness in opaque way
-					} else {
-						pipelines[i][j][k].clear();
-						continue; // do not use this version (will error if using it is attempted)
-					}
-				} else {
-					if (k == SHADER_VERSION_COLOR_PASS || k == SHADER_VERSION_COLOR_PASS_MULTIVIEW || k == SHADER_VERSION_LIGHTMAP_COLOR_PASS || k == SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW) {
-						blend_state = blend_state_opaque;
-					} else if (k == SHADER_VERSION_SHADOW_PASS || k == SHADER_VERSION_SHADOW_PASS_MULTIVIEW || k == SHADER_VERSION_SHADOW_PASS_DP) {
-						//none, leave empty
-					} else if (k == SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
-						blend_state = RD::PipelineColorBlendState::create_disabled(5); //writes to normal and roughness in opaque way
-					} else {
-						// ???
-					}
-				}
-
-				RID shader_variant = shader_singleton->shader.version_get_shader(version, k);
-				pipelines[i][j][k].setup(shader_variant, primitive_rd, raster_state, multisample_state, depth_stencil, blend_state, 0, singleton->default_specialization_constants);
+		if (p_pipeline_key.version == SHADER_VERSION_COLOR_PASS || p_pipeline_key.version == SHADER_VERSION_COLOR_PASS_MULTIVIEW || p_pipeline_key.version == SHADER_VERSION_LIGHTMAP_COLOR_PASS || p_pipeline_key.version == SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW) {
+			blend_state = blend_state_blend;
+			if (depth_draw == DEPTH_DRAW_OPAQUE && !uses_alpha_clip) {
+				// Alpha does not write to depth.
+				depth_stencil_state.enable_depth_write = false;
 			}
+		} else if (p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_MULTIVIEW || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_DP) {
+			// Contains nothing.
+		} else if (p_pipeline_key.version == SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
+			// Writes to normal and roughness in opaque way.
+			blend_state = RD::PipelineColorBlendState::create_disabled(5);
+		} else {
+			// Do not use this version (error case).
+		}
+	} else {
+		if (p_pipeline_key.version == SHADER_VERSION_COLOR_PASS || p_pipeline_key.version == SHADER_VERSION_COLOR_PASS_MULTIVIEW || p_pipeline_key.version == SHADER_VERSION_LIGHTMAP_COLOR_PASS || p_pipeline_key.version == SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW) {
+			blend_state = blend_state_opaque;
+		} else if (p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_MULTIVIEW || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_DP) {
+			// Contains nothing.
+		} else if (p_pipeline_key.version == SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
+			// Writes to normal and roughness in opaque way.
+			blend_state = RD::PipelineColorBlendState::create_disabled(5);
+		} else {
+			// Unknown pipeline version.
 		}
 	}
 
-	valid = true;
+	// Convert the specialization from the key to pipeline specialization constants.
+	Vector<RD::PipelineSpecializationConstant> specialization_constants;
+	RD::PipelineSpecializationConstant sc;
+	sc.constant_id = 0;
+	sc.int_value = p_pipeline_key.shader_specialization.packed_0;
+	sc.type = RD::PIPELINE_SPECIALIZATION_CONSTANT_TYPE_INT;
+	specialization_constants.push_back(sc);
+
+	sc.constant_id = 1;
+	sc.float_value = p_pipeline_key.shader_specialization.packed_1;
+	sc.type = RD::PIPELINE_SPECIALIZATION_CONSTANT_TYPE_FLOAT;
+	specialization_constants.push_back(sc);
+
+	RID pipeline = RD::get_singleton()->render_pipeline_create(p_pipeline_key.shader, p_pipeline_key.framebuffer_format_id, p_pipeline_key.vertex_format_id, primitive_rd, raster_state, multisample_state, depth_stencil_state, blend_state, 0, p_pipeline_key.render_pass, specialization_constants);
+	ERR_FAIL_COND(pipeline.is_null());
+
+	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key.hash(), pipeline);
 }
 
-bool SceneShaderForwardMobile::ShaderData::is_animated() const {
-	return (uses_fragment_time && uses_discard) || (uses_vertex_time && uses_vertex);
+RD::PolygonCullMode SceneShaderForwardMobile::ShaderData::get_cull_mode_from_cull_variant(CullVariant p_cull_variant) {
+	const RD::PolygonCullMode cull_mode_rd_table[CULL_VARIANT_MAX][3] = {
+		{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_FRONT, RD::POLYGON_CULL_BACK },
+		{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_BACK, RD::POLYGON_CULL_FRONT },
+		{ RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_DISABLED, RD::POLYGON_CULL_DISABLED }
+	};
+
+	return cull_mode_rd_table[p_cull_variant][cull_mode];
 }
 
-bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
-	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
-	bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
-	bool has_alpha = has_base_alpha || uses_blend_alpha;
+RID SceneShaderForwardMobile::ShaderData::get_shader_variant(ShaderVersion p_shader_version, bool p_ubershader) const {
+	MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
+	ERR_FAIL_NULL_V(SceneShaderForwardMobile::singleton, RID());
 
-	return !has_alpha || (uses_depth_prepass_alpha && !(depth_draw == DEPTH_DRAW_DISABLED || depth_test == DEPTH_TEST_DISABLED));
-}
-
-RS::ShaderNativeSourceCode SceneShaderForwardMobile::ShaderData::get_native_source_code() const {
-	SceneShaderForwardMobile *shader_singleton = (SceneShaderForwardMobile *)SceneShaderForwardMobile::singleton;
-
-	return shader_singleton->shader.version_get_native_source_code(version);
+	return SceneShaderForwardMobile::singleton->shader.version_get_shader(version, p_shader_version + (p_ubershader ? SHADER_VERSION_MAX : 0));
 }
 
 SceneShaderForwardMobile::ShaderData::ShaderData() :
 		shader_list_element(this) {
+	pipeline_hash_map.set_creation_object_and_function(this, &ShaderData::_create_pipeline);
+	pipeline_hash_map.set_compilations(SceneShaderForwardMobile::singleton->pipeline_compilations, &SceneShaderForwardMobile::singleton_mutex);
 }
 
 SceneShaderForwardMobile::ShaderData::~ShaderData() {
-	SceneShaderForwardMobile *shader_singleton = (SceneShaderForwardMobile *)SceneShaderForwardMobile::singleton;
-	ERR_FAIL_NULL(shader_singleton);
-	//pipeline variants will clear themselves if shader is gone
+	pipeline_hash_map.clear_pipelines();
+
 	if (version.is_valid()) {
-		shader_singleton->shader.version_free(version);
+		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
+		ERR_FAIL_NULL(SceneShaderForwardMobile::singleton);
+		SceneShaderForwardMobile::singleton->shader.version_free(version);
 	}
 }
 
@@ -415,6 +472,7 @@ RendererRD::MaterialStorage::MaterialData *SceneShaderForwardMobile::_create_mat
 /* Scene Shader */
 
 SceneShaderForwardMobile *SceneShaderForwardMobile::singleton = nullptr;
+Mutex SceneShaderForwardMobile::singleton_mutex;
 
 SceneShaderForwardMobile::SceneShaderForwardMobile() {
 	// there should be only one of these, contained within our RenderForwardMobile singleton.
@@ -428,23 +486,29 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 
 	{
 		Vector<String> shader_versions;
-		shader_versions.push_back(""); // SHADER_VERSION_COLOR_PASS
-		shader_versions.push_back("\n#define USE_LIGHTMAP\n"); // SHADER_VERSION_LIGHTMAP_COLOR_PASS
-		shader_versions.push_back("\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_SHADOW_PASS, should probably change this to MODE_RENDER_SHADOW because we don't have a depth pass here...
-		shader_versions.push_back("\n#define MODE_RENDER_DEPTH\n#define MODE_DUAL_PARABOLOID\n"); // SHADER_VERSION_SHADOW_PASS_DP
-		shader_versions.push_back("\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_MATERIAL\n"); // SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL
+		for (uint32_t ubershader = 0; ubershader < 2; ubershader++) {
+			const String base_define = ubershader ? "\n#define UBERSHADER\n" : "";
+			shader_versions.push_back(base_define + ""); // SHADER_VERSION_COLOR_PASS
+			shader_versions.push_back(base_define + "\n#define USE_LIGHTMAP\n"); // SHADER_VERSION_LIGHTMAP_COLOR_PASS
+			shader_versions.push_back(base_define + "\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_SHADOW_PASS, should probably change this to MODE_RENDER_SHADOW because we don't have a depth pass here...
+			shader_versions.push_back(base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_DUAL_PARABOLOID\n"); // SHADER_VERSION_SHADOW_PASS_DP
+			shader_versions.push_back(base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_MATERIAL\n"); // SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL
 
-		// multiview versions of our shaders
-		shader_versions.push_back("\n#define USE_MULTIVIEW\n"); // SHADER_VERSION_COLOR_PASS_MULTIVIEW
-		shader_versions.push_back("\n#define USE_MULTIVIEW\n#define USE_LIGHTMAP\n"); // SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW
-		shader_versions.push_back("\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_SHADOW_PASS_MULTIVIEW
+			// Multiview versions of our shaders.
+			shader_versions.push_back(base_define + "\n#define USE_MULTIVIEW\n"); // SHADER_VERSION_COLOR_PASS_MULTIVIEW
+			shader_versions.push_back(base_define + "\n#define USE_MULTIVIEW\n#define USE_LIGHTMAP\n"); // SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW
+			shader_versions.push_back(base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_SHADOW_PASS_MULTIVIEW
+		}
 
 		shader.initialize(shader_versions, p_defines);
 
 		if (!RendererCompositorRD::get_singleton()->is_xr_enabled()) {
-			shader.set_variant_enabled(SHADER_VERSION_COLOR_PASS_MULTIVIEW, false);
-			shader.set_variant_enabled(SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW, false);
-			shader.set_variant_enabled(SHADER_VERSION_SHADOW_PASS_MULTIVIEW, false);
+			for (uint32_t ubershader = 0; ubershader < 2; ubershader++) {
+				uint32_t base_variant = ubershader ? SHADER_VERSION_MAX : 0;
+				shader.set_variant_enabled(base_variant + SHADER_VERSION_COLOR_PASS_MULTIVIEW, false);
+				shader.set_variant_enabled(base_variant + SHADER_VERSION_LIGHTMAP_COLOR_PASS_MULTIVIEW, false);
+				shader.set_variant_enabled(base_variant + SHADER_VERSION_SHADOW_PASS_MULTIVIEW, false);
+			}
 		}
 	}
 
@@ -736,17 +800,21 @@ void fragment() {
 	}
 }
 
-void SceneShaderForwardMobile::set_default_specialization_constants(const Vector<RD::PipelineSpecializationConstant> &p_constants) {
-	default_specialization_constants = p_constants;
+void SceneShaderForwardMobile::set_default_specialization(const ShaderSpecialization &p_specialization) {
+	default_specialization = p_specialization;
+
 	for (SelfList<ShaderData> *E = shader_list.first(); E; E = E->next()) {
-		for (int i = 0; i < ShaderData::CULL_VARIANT_MAX; i++) {
-			for (int j = 0; j < RS::PRIMITIVE_MAX; j++) {
-				for (int k = 0; k < SHADER_VERSION_MAX; k++) {
-					E->self()->pipelines[i][j][k].update_specialization_constants(default_specialization_constants);
-				}
-			}
-		}
+		E->self()->pipeline_hash_map.clear_pipelines();
 	}
+}
+
+uint32_t SceneShaderForwardMobile::get_pipeline_compilations(RS::PipelineSource p_source) {
+	MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
+	return pipeline_compilations[p_source];
+}
+
+bool SceneShaderForwardMobile::is_multiview_enabled() const {
+	return shader.is_variant_enabled(SHADER_VERSION_COLOR_PASS_MULTIVIEW);
 }
 
 SceneShaderForwardMobile::~SceneShaderForwardMobile() {

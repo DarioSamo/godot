@@ -497,42 +497,113 @@ void main() {
 
 #define SHADER_IS_SRGB false
 
-/* Specialization Constants */
-
-#if !defined(MODE_RENDER_DEPTH)
-
-#if !defined(MODE_UNSHADED)
-
-layout(constant_id = 0) const bool sc_use_light_projector = false;
-layout(constant_id = 1) const bool sc_use_light_soft_shadows = false;
-layout(constant_id = 2) const bool sc_use_directional_soft_shadows = false;
-
-layout(constant_id = 3) const uint sc_soft_shadow_samples = 4;
-layout(constant_id = 4) const uint sc_penumbra_shadow_samples = 4;
-
-layout(constant_id = 5) const uint sc_directional_soft_shadow_samples = 4;
-layout(constant_id = 6) const uint sc_directional_penumbra_shadow_samples = 4;
-
-layout(constant_id = 8) const bool sc_projector_use_mipmaps = true;
-
-layout(constant_id = 9) const bool sc_disable_omni_lights = false;
-layout(constant_id = 10) const bool sc_disable_spot_lights = false;
-layout(constant_id = 11) const bool sc_disable_reflection_probes = false;
-layout(constant_id = 12) const bool sc_disable_directional_lights = false;
-
-#endif //!MODE_UNSHADED
-
-layout(constant_id = 7) const bool sc_decal_use_mipmaps = true;
-layout(constant_id = 13) const bool sc_disable_decals = false;
-layout(constant_id = 14) const bool sc_disable_fog = false;
-layout(constant_id = 16) const bool sc_use_depth_fog = false;
-
-#endif //!MODE_RENDER_DEPTH
-
-layout(constant_id = 15) const float sc_luminance_multiplier = 2.0;
-
 /* Include our forward mobile UBOs definitions etc. */
 #include "scene_forward_mobile_inc.glsl"
+
+/* Specialization Constants */
+
+#ifdef UBERSHADER
+
+#define POLYGON_CULL_DISABLED 0
+#define POLYGON_CULL_FRONT 1
+#define POLYGON_CULL_BACK 2
+
+// Pull the constants from the draw call's push constants.
+uint sc_packed_0() {
+	return draw_call.sc_packed_0;
+}
+
+float sc_packed_1() {
+	return draw_call.sc_packed_1;
+}
+
+uint uc_cull_mode() {
+	return (draw_call.uc_packed_0 >> 0) & 3U;
+}
+
+#else
+
+// Pull the constants from the pipeline's specialization constants.
+layout(constant_id = 0) const uint pso_sc_packed_0 = 0;
+layout(constant_id = 1) const float pso_sc_packed_1 = 2.0;
+
+uint sc_packed_0() {
+	return pso_sc_packed_0;
+}
+
+float sc_packed_1() {
+	return pso_sc_packed_1;
+}
+
+#endif
+
+bool sc_use_light_projector() {
+	return ((sc_packed_0() >> 0) & 1U) != 0;
+}
+
+bool sc_use_light_soft_shadows() {
+	return ((sc_packed_0() >> 1) & 1U) != 0;
+}
+
+bool sc_use_directional_soft_shadows() {
+	return ((sc_packed_0() >> 2) & 1U) != 0;
+}
+
+bool sc_decal_use_mipmaps() {
+	return ((sc_packed_0() >> 3) & 1U) != 0;
+}
+
+bool sc_projector_use_mipmaps() {
+	return ((sc_packed_0() >> 4) & 1U) != 0;
+}
+
+bool sc_disable_omni_lights() {
+	return ((sc_packed_0() >> 5) & 1U) != 0;
+}
+
+bool sc_disable_spot_lights() {
+	return ((sc_packed_0() >> 6) & 1U) != 0;
+}
+
+bool sc_disable_reflection_probes() {
+	return ((sc_packed_0() >> 7) & 1U) != 0;
+}
+
+bool sc_disable_directional_lights() {
+	return ((sc_packed_0() >> 8) & 1U) != 0;
+}
+
+bool sc_disable_decals() {
+	return ((sc_packed_0() >> 9) & 1U) != 0;
+}
+
+bool sc_disable_fog() {
+	return ((sc_packed_0() >> 10) & 1U) != 0;
+}
+
+bool sc_use_depth_fog() {
+	return ((sc_packed_0() >> 11) & 1U) != 0;
+}
+
+uint sc_soft_shadow_samples() {
+	return (sc_packed_0() >> 12) & 15U;
+}
+
+uint sc_penumbra_shadow_samples() {
+	return (sc_packed_0() >> 16) & 15U;
+}
+
+uint sc_directional_soft_shadow_samples() {
+	return (sc_packed_0() >> 20) & 15U;
+}
+
+uint sc_directional_penumbra_shadow_samples() {
+	return (sc_packed_0() >> 24) & 15U;
+}
+
+float sc_luminance_multiplier() {
+	return sc_packed_1();
+}
 
 /* Varyings */
 
@@ -693,7 +764,7 @@ vec4 fog_process(vec3 vertex) {
 
 	float fog_amount = 0.0;
 
-	if (sc_use_depth_fog) {
+	if (sc_use_depth_fog()) {
 		float fog_z = smoothstep(scene_data_block.data.fog_depth_begin, scene_data_block.data.fog_depth_end, length(vertex));
 		float fog_quad_amount = pow(fog_z, scene_data_block.data.fog_depth_curve) * scene_data_block.data.fog_density;
 		fog_amount = fog_quad_amount;
@@ -719,6 +790,14 @@ vec4 fog_process(vec3 vertex) {
 #define scene_data scene_data_block.data
 
 void main() {
+#ifdef UBERSHADER
+	bool front_facing = gl_FrontFacing;
+	if (uc_cull_mode() == POLYGON_CULL_BACK && !front_facing) {
+		discard;
+	} else if (uc_cull_mode() == POLYGON_CULL_FRONT && front_facing) {
+		discard;
+	}
+#endif
 #ifdef MODE_DUAL_PARABOLOID
 
 	if (dp_clip > 0.0)
@@ -921,7 +1000,7 @@ void main() {
 	// to maximize VGPR usage
 	// Draw "fixed" fog before volumetric fog to ensure volumetric fog can appear in front of the sky.
 
-	if (!sc_disable_fog && scene_data.fog_enabled) {
+	if (!sc_disable_fog() && scene_data.fog_enabled) {
 		fog = fog_process(vertex);
 	}
 
@@ -940,7 +1019,7 @@ void main() {
 	vec3 vertex_ddx = dFdx(vertex);
 	vec3 vertex_ddy = dFdy(vertex);
 
-	if (!sc_disable_decals) { //Decals
+	if (!sc_disable_decals()) { //Decals
 		// must implement
 
 		uint decal_indices = instances.data[draw_call.instance_index].decals.x;
@@ -978,7 +1057,7 @@ void main() {
 			if (decals.data[decal_index].albedo_rect != vec4(0.0)) {
 				//has albedo
 				vec4 decal_albedo;
-				if (sc_decal_use_mipmaps) {
+				if (sc_decal_use_mipmaps()) {
 					decal_albedo = textureGrad(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].albedo_rect.zw + decals.data[decal_index].albedo_rect.xy, ddx * decals.data[decal_index].albedo_rect.zw, ddy * decals.data[decal_index].albedo_rect.zw);
 				} else {
 					decal_albedo = textureLod(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].albedo_rect.zw + decals.data[decal_index].albedo_rect.xy, 0.0);
@@ -989,7 +1068,7 @@ void main() {
 
 				if (decals.data[decal_index].normal_rect != vec4(0.0)) {
 					vec3 decal_normal;
-					if (sc_decal_use_mipmaps) {
+					if (sc_decal_use_mipmaps()) {
 						decal_normal = textureGrad(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].normal_rect.zw + decals.data[decal_index].normal_rect.xy, ddx * decals.data[decal_index].normal_rect.zw, ddy * decals.data[decal_index].normal_rect.zw).xyz;
 					} else {
 						decal_normal = textureLod(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].normal_rect.zw + decals.data[decal_index].normal_rect.xy, 0.0).xyz;
@@ -1004,7 +1083,7 @@ void main() {
 
 				if (decals.data[decal_index].orm_rect != vec4(0.0)) {
 					vec3 decal_orm;
-					if (sc_decal_use_mipmaps) {
+					if (sc_decal_use_mipmaps()) {
 						decal_orm = textureGrad(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].orm_rect.zw + decals.data[decal_index].orm_rect.xy, ddx * decals.data[decal_index].orm_rect.zw, ddy * decals.data[decal_index].orm_rect.zw).xyz;
 					} else {
 						decal_orm = textureLod(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].orm_rect.zw + decals.data[decal_index].orm_rect.xy, 0.0).xyz;
@@ -1017,7 +1096,7 @@ void main() {
 
 			if (decals.data[decal_index].emission_rect != vec4(0.0)) {
 				//emission is additive, so its independent from albedo
-				if (sc_decal_use_mipmaps) {
+				if (sc_decal_use_mipmaps()) {
 					emission += textureGrad(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].emission_rect.zw + decals.data[decal_index].emission_rect.xy, ddx * decals.data[decal_index].emission_rect.zw, ddy * decals.data[decal_index].emission_rect.zw).xyz * decals.data[decal_index].emission_energy * fade;
 				} else {
 					emission += textureLod(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].emission_rect.zw + decals.data[decal_index].emission_rect.xy, 0.0).xyz * decals.data[decal_index].emission_energy * fade;
@@ -1079,7 +1158,7 @@ void main() {
 		specular_light = textureLod(samplerCube(radiance_cubemap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), ref_vec, sqrt(roughness) * MAX_ROUGHNESS_LOD).rgb;
 
 #endif //USE_RADIANCE_CUBEMAP_ARRAY
-		specular_light *= sc_luminance_multiplier;
+		specular_light *= sc_luminance_multiplier();
 		specular_light *= scene_data.IBL_exposure_normalization;
 		specular_light *= horizon * horizon;
 		specular_light *= scene_data.ambient_light_color_energy.a;
@@ -1101,7 +1180,7 @@ void main() {
 #else
 			vec3 cubemap_ambient = textureLod(samplerCube(radiance_cubemap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), ambient_dir, MAX_ROUGHNESS_LOD).rgb;
 #endif //USE_RADIANCE_CUBEMAP_ARRAY
-			cubemap_ambient *= sc_luminance_multiplier;
+			cubemap_ambient *= sc_luminance_multiplier();
 			cubemap_ambient *= scene_data.IBL_exposure_normalization;
 			ambient_light = mix(ambient_light, cubemap_ambient * scene_data.ambient_light_color_energy.a, scene_data.ambient_color_sky_mix);
 		}
@@ -1211,7 +1290,7 @@ void main() {
 
 	// skipping ssao, do we remove ssao totally?
 
-	if (!sc_disable_reflection_probes) { //Reflection probes
+	if (!sc_disable_reflection_probes()) { //Reflection probes
 		vec4 reflection_accum = vec4(0.0, 0.0, 0.0, 0.0);
 		vec4 ambient_accum = vec4(0.0, 0.0, 0.0, 0.0);
 
@@ -1302,7 +1381,7 @@ void main() {
 // LIGHTING
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
-	if (!sc_disable_directional_lights) { //directional light
+	if (!sc_disable_directional_lights()) { //directional light
 #ifndef SHADOWS_DISABLED
 		// Do shadow and lighting in two passes to reduce register pressure
 		uint shadow0 = 0;
@@ -1653,7 +1732,7 @@ void main() {
 		}
 	} //directional light
 
-	if (!sc_disable_omni_lights) { //omni lights
+	if (!sc_disable_omni_lights()) { //omni lights
 		uint light_indices = instances.data[draw_call.instance_index].omni_lights.x;
 		for (uint i = 0; i < 8; i++) {
 			uint light_index = light_indices & 0xFF;
@@ -1697,7 +1776,7 @@ void main() {
 		}
 	} //omni lights
 
-	if (!sc_disable_spot_lights) { //spot lights
+	if (!sc_disable_spot_lights()) { //spot lights
 
 		uint light_indices = instances.data[draw_call.instance_index].spot_lights.x;
 		for (uint i = 0; i < 8; i++) {
@@ -1840,7 +1919,7 @@ void main() {
 
 	// On mobile we use a UNORM buffer with 10bpp which results in a range from 0.0 - 1.0 resulting in HDR breaking
 	// We divide by sc_luminance_multiplier to support a range from 0.0 - 2.0 both increasing precision on bright and darker images
-	frag_color.rgb = frag_color.rgb / sc_luminance_multiplier;
+	frag_color.rgb = frag_color.rgb / sc_luminance_multiplier();
 
 #endif //MODE_MULTIPLE_RENDER_TARGETS
 

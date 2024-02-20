@@ -39,7 +39,9 @@
 // TODO: Thread safety
 // - Roll back thread safe attribute for RID_Owner members after the read-only/atomic update scheme is implemented.
 
+#define ENABLE_PIPELINE_CACHE 0
 #define FORCE_SEPARATE_PRESENT_QUEUE 0
+#define PRINT_FRAMEBUFFER_FORMAT 0
 
 #define ERR_RENDER_THREAD_MSG String("This function (") + String(__func__) + String(") can only be called from the render thread. ")
 #define ERR_RENDER_THREAD_GUARD() ERR_FAIL_COND_MSG(render_thread_id != Thread::get_caller_id(), ERR_RENDER_THREAD_MSG);
@@ -1963,6 +1965,8 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(const Vector<AttachmentFo
 		}
 		for (int j = 0; j < pass->resolve_attachments.size(); j++) {
 			int32_t attachment = pass->resolve_attachments[j];
+			attachments[attachment].load_op = RDD::ATTACHMENT_LOAD_OP_DONT_CARE;
+
 			RDD::AttachmentReference reference;
 			if (attachment == ATTACHMENT_UNUSED) {
 				reference.attachment = RDD::AttachmentReference::UNUSED;
@@ -2094,6 +2098,14 @@ RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create_
 	fb_format.pass_samples = samples;
 	fb_format.view_count = p_view_count;
 	framebuffer_formats[id] = fb_format;
+
+#if PRINT_FRAMEBUFFER_FORMAT
+	print_line("FRAMEBUFFER FORMAT:", id, "ATTACHMENTS:", p_attachments.size(), "PASSES:", p_passes.size());
+	for (RD::AttachmentFormat attachment : p_attachments) {
+		print_line("FORMAT:", attachment.format, "SAMPLES:", attachment.samples, "USAGE FLAGS:", attachment.usage_flags);
+	}
+#endif
+
 	return id;
 }
 
@@ -2124,6 +2136,11 @@ RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create_
 	fb_format.render_pass = render_pass;
 	fb_format.pass_samples.push_back(p_samples);
 	framebuffer_formats[id] = fb_format;
+
+#if PRINT_FRAMEBUFFER_FORMAT
+	print_line("FRAMEBUFFER FORMAT:", id, "ATTACHMENTS: EMPTY");
+#endif
+
 	return id;
 }
 
@@ -3095,21 +3112,22 @@ void RenderingDevice::uniform_set_set_invalidation_callback(RID p_uniform_set, I
 /*******************/
 
 RID RenderingDevice::render_pipeline_create(RID p_shader, FramebufferFormatID p_framebuffer_format, VertexFormatID p_vertex_format, RenderPrimitive p_render_primitive, const PipelineRasterizationState &p_rasterization_state, const PipelineMultisampleState &p_multisample_state, const PipelineDepthStencilState &p_depth_stencil_state, const PipelineColorBlendState &p_blend_state, BitField<PipelineDynamicStateFlags> p_dynamic_state_flags, uint32_t p_for_render_pass, const Vector<PipelineSpecializationConstant> &p_specialization_constants) {
-	_THREAD_SAFE_METHOD_
-
 	// Needs a shader.
 	Shader *shader = shader_owner.get_or_null(p_shader);
 	ERR_FAIL_NULL_V(shader, RID());
+	ERR_FAIL_COND_V_MSG(shader->is_compute, RID(), "Compute shaders can't be used in render pipelines");
 
-	ERR_FAIL_COND_V_MSG(shader->is_compute, RID(),
-			"Compute shaders can't be used in render pipelines");
+	FramebufferFormat fb_format;
+	{
+		_THREAD_SAFE_METHOD_
 
-	if (p_framebuffer_format == INVALID_ID) {
-		// If nothing provided, use an empty one (no attachments).
-		p_framebuffer_format = framebuffer_format_create(Vector<AttachmentFormat>());
+		if (p_framebuffer_format == INVALID_ID) {
+			// If nothing provided, use an empty one (no attachments).
+			p_framebuffer_format = framebuffer_format_create(Vector<AttachmentFormat>());
+		}
+		ERR_FAIL_COND_V(!framebuffer_formats.has(p_framebuffer_format), RID());
+		fb_format = framebuffer_formats[p_framebuffer_format];
 	}
-	ERR_FAIL_COND_V(!framebuffer_formats.has(p_framebuffer_format), RID());
-	const FramebufferFormat &fb_format = framebuffer_formats[p_framebuffer_format];
 
 	// Validate shader vs. framebuffer.
 	{
@@ -3254,13 +3272,19 @@ RID RenderingDevice::render_pipeline_create(RID p_shader, FramebufferFormatID p_
 	};
 	pipeline.validation.primitive_minimum = primitive_minimum[p_render_primitive];
 #endif
+
 	// Create ID to associate with this pipeline.
 	RID id = render_pipeline_owner.make_rid(pipeline);
+	{
+		_THREAD_SAFE_METHOD_
+
 #ifdef DEV_ENABLED
-	set_resource_name(id, "RID:" + itos(id.get_id()));
+		set_resource_name(id, "RID:" + itos(id.get_id()));
 #endif
-	// Now add all the dependencies.
-	_add_dependency(id, p_shader);
+		// Now add all the dependencies.
+		_add_dependency(id, p_shader);
+	}
+
 	return id;
 }
 
@@ -3271,14 +3295,18 @@ bool RenderingDevice::render_pipeline_is_valid(RID p_pipeline) {
 }
 
 RID RenderingDevice::compute_pipeline_create(RID p_shader, const Vector<PipelineSpecializationConstant> &p_specialization_constants) {
-	_THREAD_SAFE_METHOD_
+	Shader *shader;
 
-	// Needs a shader.
-	Shader *shader = shader_owner.get_or_null(p_shader);
-	ERR_FAIL_NULL_V(shader, RID());
+	{
+		_THREAD_SAFE_METHOD_
 
-	ERR_FAIL_COND_V_MSG(!shader->is_compute, RID(),
-			"Non-compute shaders can't be used in compute pipelines");
+		// Needs a shader.
+		shader = shader_owner.get_or_null(p_shader);
+		ERR_FAIL_NULL_V(shader, RID());
+
+		ERR_FAIL_COND_V_MSG(!shader->is_compute, RID(),
+				"Non-compute shaders can't be used in compute pipelines");
+	}
 
 	for (int i = 0; i < shader->specialization_constants.size(); i++) {
 		const ShaderSpecializationConstant &sc = shader->specialization_constants[i];
@@ -3310,11 +3338,16 @@ RID RenderingDevice::compute_pipeline_create(RID p_shader, const Vector<Pipeline
 
 	// Create ID to associate with this pipeline.
 	RID id = compute_pipeline_owner.make_rid(pipeline);
+	{
+		_THREAD_SAFE_METHOD_
+
 #ifdef DEV_ENABLED
-	set_resource_name(id, "RID:" + itos(id.get_id()));
+		set_resource_name(id, "RID:" + itos(id.get_id()));
 #endif
-	// Now add all the dependencies.
-	_add_dependency(id, p_shader);
+		// Now add all the dependencies.
+		_add_dependency(id, p_shader);
+	}
+
 	return id;
 }
 
@@ -3752,23 +3785,35 @@ void RenderingDevice::draw_list_bind_render_pipeline(DrawListID p_list, RID p_re
 		const uint32_t *pformats = pipeline->set_formats.ptr(); // Pipeline set formats.
 
 		uint32_t first_invalid_set = UINT32_MAX; // All valid by default.
-		switch (driver->api_trait_get(RDD::API_TRAIT_SHADER_CHANGE_INVALIDATION)) {
-			case RDD::SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS: {
-				first_invalid_set = 0;
-			} break;
-			case RDD::SHADER_CHANGE_INVALIDATION_INCOMPATIBLE_SETS_PLUS_CASCADE: {
-				for (uint32_t i = 0; i < pcount; i++) {
-					if (dl->state.sets[i].pipeline_expected_format != pformats[i]) {
-						first_invalid_set = i;
-						break;
-					}
-				}
-			} break;
-			case RDD::SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH: {
-				if (dl->state.pipeline_shader_layout_hash != pipeline->shader_layout_hash) {
+		if (pipeline->push_constant_size != dl->state.pipeline_push_constant_size) {
+			// All sets must be invalidated as the pipeline layout is not compatible if the push constant range is different.
+			dl->state.pipeline_push_constant_size = pipeline->push_constant_size;
+			first_invalid_set = 0;
+		} else {
+			switch (driver->api_trait_get(RDD::API_TRAIT_SHADER_CHANGE_INVALIDATION)) {
+				case RDD::SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS: {
 					first_invalid_set = 0;
-				}
-			} break;
+				} break;
+				case RDD::SHADER_CHANGE_INVALIDATION_INCOMPATIBLE_SETS_PLUS_CASCADE: {
+					for (uint32_t i = 0; i < pcount; i++) {
+						if (dl->state.sets[i].pipeline_expected_format != pformats[i]) {
+							first_invalid_set = i;
+							break;
+						}
+					}
+				} break;
+				case RDD::SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH: {
+					if (dl->state.pipeline_shader_layout_hash != pipeline->shader_layout_hash) {
+						first_invalid_set = 0;
+					}
+				} break;
+			}
+		}
+
+		if (pipeline->push_constant_size) {
+#ifdef DEBUG_ENABLED
+			dl->validation.pipeline_push_constant_supplied = false;
+#endif
 		}
 
 		for (uint32_t i = 0; i < pcount; i++) {
@@ -3782,12 +3827,6 @@ void RenderingDevice::draw_list_bind_render_pipeline(DrawListID p_list, RID p_re
 		}
 
 		dl->state.set_count = pcount; // Update set count.
-
-		if (pipeline->push_constant_size) {
-#ifdef DEBUG_ENABLED
-			dl->validation.pipeline_push_constant_supplied = false;
-#endif
-		}
 
 		dl->state.pipeline_shader = pipeline->shader;
 		dl->state.pipeline_shader_driver_id = pipeline->shader_driver_id;
@@ -5612,6 +5651,7 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 	draw_list = nullptr;
 	compute_list = nullptr;
 
+#if ENABLE_PIPELINE_CACHE
 	if (main_instance) {
 		// Only the instance that is not a local device and is also the singleton is allowed to manage a pipeline cache.
 		pipeline_cache_file_path = vformat("user://vulkan/pipelines.%s.%s",
@@ -5629,6 +5669,7 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 			print_verbose(vformat("Startup PSO cache (%.1f MiB)", pipeline_cache_size / (1024.0f * 1024.0f)));
 		}
 	}
+#endif
 
 	return OK;
 }
@@ -5646,6 +5687,8 @@ Vector<uint8_t> RenderingDevice::_load_pipeline_cache() {
 }
 
 void RenderingDevice::_update_pipeline_cache(bool p_closing) {
+	_THREAD_SAFE_METHOD_
+
 	{
 		bool still_saving = pipeline_cache_save_task != WorkerThreadPool::INVALID_TASK_ID && !WorkerThreadPool::get_singleton()->is_task_completed(pipeline_cache_save_task);
 		if (still_saving) {

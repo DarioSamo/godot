@@ -349,14 +349,9 @@ public:
 
 	struct AttachmentFormat {
 		enum { UNUSED_ATTACHMENT = 0xFFFFFFFF };
-		DataFormat format;
-		TextureSamples samples;
-		uint32_t usage_flags;
-		AttachmentFormat() {
-			format = DATA_FORMAT_R8G8B8A8_UNORM;
-			samples = TEXTURE_SAMPLES_1;
-			usage_flags = 0;
-		}
+		DataFormat format = DATA_FORMAT_R8G8B8A8_UNORM;
+		TextureSamples samples = TEXTURE_SAMPLES_1;
+		uint32_t usage_flags = 0;
 	};
 
 	struct FramebufferPass {
@@ -1059,6 +1054,7 @@ private:
 			RID pipeline_shader;
 			RDD::ShaderID pipeline_shader_driver_id;
 			uint32_t pipeline_shader_layout_hash = 0;
+			uint32_t pipeline_push_constant_size = 0;
 			RID vertex_array;
 			RID index_array;
 		} state;

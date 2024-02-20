@@ -639,29 +639,84 @@ void main() {
 
 #define SHADER_IS_SRGB false
 
-/* Specialization Constants (Toggles) */
-
-layout(constant_id = 0) const bool sc_use_forward_gi = false;
-layout(constant_id = 1) const bool sc_use_light_projector = false;
-layout(constant_id = 2) const bool sc_use_light_soft_shadows = false;
-layout(constant_id = 3) const bool sc_use_directional_soft_shadows = false;
-
-/* Specialization Constants (Values) */
-
-layout(constant_id = 6) const uint sc_soft_shadow_samples = 4;
-layout(constant_id = 7) const uint sc_penumbra_shadow_samples = 4;
-
-layout(constant_id = 8) const uint sc_directional_soft_shadow_samples = 4;
-layout(constant_id = 9) const uint sc_directional_penumbra_shadow_samples = 4;
-
-layout(constant_id = 10) const bool sc_decal_use_mipmaps = true;
-layout(constant_id = 11) const bool sc_projector_use_mipmaps = true;
-layout(constant_id = 12) const bool sc_use_depth_fog = false;
-
-// not used in clustered renderer but we share some code with the mobile renderer that requires this.
-const float sc_luminance_multiplier = 1.0;
-
 #include "scene_forward_clustered_inc.glsl"
+
+/* Specialization Constants */
+
+#ifdef UBERSHADER
+
+#define POLYGON_CULL_DISABLED 0
+#define POLYGON_CULL_FRONT 1
+#define POLYGON_CULL_BACK 2
+
+// Pull the constants from the draw call's push constants.
+uint sc_packed_0() {
+	return draw_call.sc_packed_0;
+}
+
+uint uc_cull_mode() {
+	return (draw_call.uc_packed_0 >> 0) & 3U;
+}
+
+#else
+
+// Pull the constants from the pipeline's specialization constants.
+layout(constant_id = 0) const uint pso_sc_packed_0 = 0;
+
+uint sc_packed_0() {
+	return pso_sc_packed_0;
+}
+
+#endif
+
+bool sc_use_forward_gi() {
+	return ((sc_packed_0() >> 0) & 1U) != 0;
+}
+
+bool sc_use_light_projector() {
+	return ((sc_packed_0() >> 1) & 1U) != 0;
+}
+
+bool sc_use_light_soft_shadows() {
+	return ((sc_packed_0() >> 2) & 1U) != 0;
+}
+
+bool sc_use_directional_soft_shadows() {
+	return ((sc_packed_0() >> 3) & 1U) != 0;
+}
+
+bool sc_decal_use_mipmaps() {
+	return ((sc_packed_0() >> 4) & 1U) != 0;
+}
+
+bool sc_projector_use_mipmaps() {
+	return ((sc_packed_0() >> 5) & 1U) != 0;
+}
+
+bool sc_use_depth_fog() {
+	return ((sc_packed_0() >> 6) & 1U) != 0;
+}
+
+uint sc_soft_shadow_samples() {
+	return (sc_packed_0() >> 8) & 15U;
+}
+
+uint sc_penumbra_shadow_samples() {
+	return (sc_packed_0() >> 12) & 15U;
+}
+
+uint sc_directional_soft_shadow_samples() {
+	return (sc_packed_0() >> 16) & 15U;
+}
+
+uint sc_directional_penumbra_shadow_samples() {
+	return (sc_packed_0() >> 20) & 15U;
+}
+
+float sc_luminance_multiplier() {
+	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
+	return 1.0;
+}
 
 /* Varyings */
 
@@ -851,7 +906,7 @@ vec4 fog_process(vec3 vertex) {
 
 	float fog_amount = 0.0;
 
-	if (sc_use_depth_fog) {
+	if (sc_use_depth_fog()) {
 		float fog_z = smoothstep(scene_data_block.data.fog_depth_begin, scene_data_block.data.fog_depth_end, length(vertex));
 		float fog_quad_amount = pow(fog_z, scene_data_block.data.fog_depth_curve) * scene_data_block.data.fog_density;
 		fog_amount = fog_quad_amount;
@@ -1215,7 +1270,7 @@ void fragment_shader(in SceneData scene_data) {
 				if (decals.data[decal_index].albedo_rect != vec4(0.0)) {
 					//has albedo
 					vec4 decal_albedo;
-					if (sc_decal_use_mipmaps) {
+					if (sc_decal_use_mipmaps()) {
 						decal_albedo = textureGrad(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].albedo_rect.zw + decals.data[decal_index].albedo_rect.xy, ddx * decals.data[decal_index].albedo_rect.zw, ddy * decals.data[decal_index].albedo_rect.zw);
 					} else {
 						decal_albedo = textureLod(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].albedo_rect.zw + decals.data[decal_index].albedo_rect.xy, 0.0);
@@ -1226,7 +1281,7 @@ void fragment_shader(in SceneData scene_data) {
 
 					if (decals.data[decal_index].normal_rect != vec4(0.0)) {
 						vec3 decal_normal;
-						if (sc_decal_use_mipmaps) {
+						if (sc_decal_use_mipmaps()) {
 							decal_normal = textureGrad(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].normal_rect.zw + decals.data[decal_index].normal_rect.xy, ddx * decals.data[decal_index].normal_rect.zw, ddy * decals.data[decal_index].normal_rect.zw).xyz;
 						} else {
 							decal_normal = textureLod(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].normal_rect.zw + decals.data[decal_index].normal_rect.xy, 0.0).xyz;
@@ -1241,7 +1296,7 @@ void fragment_shader(in SceneData scene_data) {
 
 					if (decals.data[decal_index].orm_rect != vec4(0.0)) {
 						vec3 decal_orm;
-						if (sc_decal_use_mipmaps) {
+						if (sc_decal_use_mipmaps()) {
 							decal_orm = textureGrad(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].orm_rect.zw + decals.data[decal_index].orm_rect.xy, ddx * decals.data[decal_index].orm_rect.zw, ddy * decals.data[decal_index].orm_rect.zw).xyz;
 						} else {
 							decal_orm = textureLod(sampler2D(decal_atlas, decal_sampler), uv_local.xz * decals.data[decal_index].orm_rect.zw + decals.data[decal_index].orm_rect.xy, 0.0).xyz;
@@ -1254,7 +1309,7 @@ void fragment_shader(in SceneData scene_data) {
 
 				if (decals.data[decal_index].emission_rect != vec4(0.0)) {
 					//emission is additive, so its independent from albedo
-					if (sc_decal_use_mipmaps) {
+					if (sc_decal_use_mipmaps()) {
 						emission += textureGrad(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].emission_rect.zw + decals.data[decal_index].emission_rect.xy, ddx * decals.data[decal_index].emission_rect.zw, ddy * decals.data[decal_index].emission_rect.zw).xyz * decals.data[decal_index].modulate.rgb * decals.data[decal_index].emission_energy * fade;
 					} else {
 						emission += textureLod(sampler2D(decal_atlas_srgb, decal_sampler), uv_local.xz * decals.data[decal_index].emission_rect.zw + decals.data[decal_index].emission_rect.xy, 0.0).xyz * decals.data[decal_index].modulate.rgb * decals.data[decal_index].emission_energy * fade;
@@ -1447,7 +1502,7 @@ void fragment_shader(in SceneData scene_data) {
 	}
 #else
 
-	if (sc_use_forward_gi && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_SDFGI)) { //has lightmap capture
+	if (sc_use_forward_gi() && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_SDFGI)) { //has lightmap capture
 
 		//make vertex orientation the world one, but still align to camera
 		vec3 cam_pos = mat3(scene_data.inv_view_matrix) * vertex;
@@ -1519,7 +1574,7 @@ void fragment_shader(in SceneData scene_data) {
 		}
 	}
 
-	if (sc_use_forward_gi && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_VOXEL_GI)) { // process voxel_gi_instances
+	if (sc_use_forward_gi() && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_VOXEL_GI)) { // process voxel_gi_instances
 		uint index1 = instances.data[instance_index].gi_offset & 0xFFFF;
 		// Make vertex orientation the world one, but still align to camera.
 		vec3 cam_pos = mat3(scene_data.inv_view_matrix) * vertex;
@@ -1554,7 +1609,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light = amb_accum.rgb;
 	}
 
-	if (!sc_use_forward_gi && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_GI_BUFFERS)) { //use GI buffers
+	if (!sc_use_forward_gi() && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_GI_BUFFERS)) { //use GI buffers
 
 		vec2 coord;
 
@@ -1770,7 +1825,7 @@ void fragment_shader(in SceneData scene_data) {
 	m_var.xyz += normal_bias;
 
 				//version with soft shadows, more expensive
-				if (sc_use_directional_soft_shadows && directional_lights.data[i].softshadow_angle > 0) {
+				if (sc_use_directional_soft_shadows() && directional_lights.data[i].softshadow_angle > 0) {
 					uint blend_count = 0;
 					const uint blend_max = directional_lights.data[i].blend_splits ? 2 : 1;
 
@@ -2043,7 +2098,7 @@ void fragment_shader(in SceneData scene_data) {
 			shadow = 1.0;
 #endif
 
-			float size_A = sc_use_light_soft_shadows ? directional_lights.data[i].size : 0.0;
+			float size_A = sc_use_light_soft_shadows() ? directional_lights.data[i].size : 0.0;
 
 			light_compute(normal, directional_lights.data[i].direction, normalize(view), size_A,
 #ifndef DEBUG_DRAW_PSSM_SPLITS
@@ -2455,6 +2510,14 @@ void fragment_shader(in SceneData scene_data) {
 }
 
 void main() {
+#ifdef UBERSHADER
+	bool front_facing = gl_FrontFacing;
+	if (uc_cull_mode() == POLYGON_CULL_BACK && !front_facing) {
+		discard;
+	} else if (uc_cull_mode() == POLYGON_CULL_FRONT && front_facing) {
+		discard;
+	}
+#endif
 #ifdef MODE_DUAL_PARABOLOID
 
 	if (dp_clip > 0.0)

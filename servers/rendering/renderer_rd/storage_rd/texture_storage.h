@@ -770,6 +770,9 @@ public:
 
 	void render_target_set_framebuffer_uniform_set(RID p_render_target, RID p_uniform_set);
 	void render_target_set_backbuffer_uniform_set(RID p_render_target, RID p_uniform_set);
+
+	static RD::DataFormat render_target_get_color_format(bool p_use_hdr, bool p_srgb);
+	static uint32_t render_target_get_color_usage_bits(bool p_msaa);
 };
 
 } // namespace RendererRD

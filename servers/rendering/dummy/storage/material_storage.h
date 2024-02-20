@@ -56,6 +56,8 @@ public:
 	MaterialStorage();
 	~MaterialStorage();
 
+	virtual bool can_create_resources_async() const override;
+
 	/* GLOBAL SHADER UNIFORM API */
 
 	virtual void global_shader_parameter_add(const StringName &p_name, RS::GlobalShaderParameterType p_type, const Variant &p_value) override {}

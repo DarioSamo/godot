@@ -244,6 +244,7 @@ private:
 	Material *get_material(RID p_rid) { return material_owner.get_or_null(p_rid); };
 
 	SelfList<Material>::List material_update_list;
+	Mutex material_update_list_mutex;
 
 	static void _material_uniform_set_erased(void *p_material);
 
@@ -252,6 +253,8 @@ public:
 
 	MaterialStorage();
 	virtual ~MaterialStorage();
+
+	virtual bool can_create_resources_async() const override;
 
 	bool free(RID p_rid);
 

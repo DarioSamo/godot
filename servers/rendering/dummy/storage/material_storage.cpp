@@ -44,6 +44,10 @@ MaterialStorage::~MaterialStorage() {
 	singleton = nullptr;
 }
 
+bool MaterialStorage::can_create_resources_async() const {
+	return false;
+}
+
 RID MaterialStorage::shader_allocate() {
 	return shader_owner.allocate_rid();
 }

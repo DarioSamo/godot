@@ -52,7 +52,9 @@ public:
 	};
 
 private:
-	RID shader;
+	mutable RID shader_rid;
+	mutable String pp_code;
+
 	Mode mode = MODE_SPATIAL;
 	HashSet<Ref<ShaderInclude>> include_dependencies;
 	String code;
@@ -60,6 +62,7 @@ private:
 
 	HashMap<StringName, HashMap<int, Ref<Texture2D>>> default_textures;
 
+	void _check_shader_rid() const;
 	void _dependency_changed();
 	void _recompile();
 	virtual void _update_shader() const; //used for visual shader

@@ -20,6 +20,12 @@ layout(push_constant, std430) uniform DrawCall {
 	vec2 uv_offset;
 	uint instance_index;
 	uint pad;
+#ifdef UBERSHADER
+	uint sc_packed_0;
+	float sc_packed_1;
+	uint sc_packed_2;
+	uint uc_packed_0;
+#endif
 }
 draw_call;
 

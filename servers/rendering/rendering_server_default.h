@@ -232,6 +232,26 @@ public:
 
 	FUNCRIDSPLIT(shader)
 
+	virtual RID shader_create_from_code(const String &p_code, const String &p_path_hint = String()) override {
+		RID shader = RSG::material_storage->shader_allocate();
+		bool using_server_thread = Thread::get_caller_id() == server_thread;
+		if (using_server_thread || RSG::material_storage->can_create_resources_async()) {
+			if (using_server_thread) {
+				command_queue.flush_if_pending();
+			}
+
+			RSG::material_storage->shader_initialize(shader);
+			RSG::material_storage->shader_set_code(shader, p_code);
+			RSG::material_storage->shader_set_path_hint(shader, p_path_hint);
+		} else {
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::shader_initialize, shader);
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::shader_set_code, shader, p_code);
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::shader_set_path_hint, shader, p_path_hint);
+		}
+
+		return shader;
+	}
+
 	FUNC2(shader_set_code, RID, const String &)
 	FUNC2(shader_set_path_hint, RID, const String &)
 	FUNC1RC(String, shader_get_code, RID)
@@ -247,6 +267,28 @@ public:
 	/* COMMON MATERIAL API */
 
 	FUNCRIDSPLIT(material)
+
+	virtual RID material_create_from_shader(RID p_next_pass, int p_render_priority, RID p_shader) override {
+		RID material = RSG::material_storage->material_allocate();
+		bool using_server_thread = Thread::get_caller_id() == server_thread;
+		if (using_server_thread || RSG::material_storage->can_create_resources_async()) {
+			if (using_server_thread) {
+				command_queue.flush_if_pending();
+			}
+
+			RSG::material_storage->material_initialize(material);
+			RSG::material_storage->material_set_next_pass(material, p_next_pass);
+			RSG::material_storage->material_set_render_priority(material, p_render_priority);
+			RSG::material_storage->material_set_shader(material, p_shader);
+		} else {
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::material_initialize, material);
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::material_set_next_pass, material, p_next_pass);
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::material_set_render_priority, material, p_render_priority);
+			command_queue.push(RSG::material_storage, &RendererMaterialStorage::material_set_shader, material, p_shader);
+		}
+
+		return material;
+	}
 
 	FUNC2(material_set_shader, RID, RID)
 
@@ -270,8 +312,9 @@ public:
 
 		// TODO once we have RSG::mesh_storage, add can_create_resources_async and call here instead of texture_storage!!
 
-		if (Thread::get_caller_id() == server_thread || RSG::texture_storage->can_create_resources_async()) {
-			if (Thread::get_caller_id() == server_thread) {
+		bool using_server_thread = Thread::get_caller_id() == server_thread;
+		if (using_server_thread || RSG::texture_storage->can_create_resources_async()) {
+			if (using_server_thread) {
 				command_queue.flush_if_pending();
 			}
 			RSG::mesh_storage->mesh_initialize(mesh);
@@ -279,12 +322,14 @@ public:
 			for (int i = 0; i < p_surfaces.size(); i++) {
 				RSG::mesh_storage->mesh_add_surface(mesh, p_surfaces[i]);
 			}
+			RSG::scene->mesh_generate_pipelines(mesh, using_server_thread);
 		} else {
 			command_queue.push(RSG::mesh_storage, &RendererMeshStorage::mesh_initialize, mesh);
 			command_queue.push(RSG::mesh_storage, &RendererMeshStorage::mesh_set_blend_shape_count, mesh, p_blend_shape_count);
 			for (int i = 0; i < p_surfaces.size(); i++) {
 				command_queue.push(RSG::mesh_storage, &RendererMeshStorage::mesh_add_surface, mesh, p_surfaces[i]);
 			}
+			command_queue.push(RSG::scene, &RenderingMethod::mesh_generate_pipelines, mesh, true);
 		}
 
 		return mesh;

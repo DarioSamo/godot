@@ -89,6 +89,10 @@ void Performance::_bind_methods() {
 	BIND_ENUM_CONSTANT(NAVIGATION_EDGE_MERGE_COUNT);
 	BIND_ENUM_CONSTANT(NAVIGATION_EDGE_CONNECTION_COUNT);
 	BIND_ENUM_CONSTANT(NAVIGATION_EDGE_FREE_COUNT);
+	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_MESH);
+	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_SURFACE);
+	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_DRAW);
+	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_SPECIALIZATION);
 	BIND_ENUM_CONSTANT(MONITOR_MAX);
 }
 
@@ -139,7 +143,10 @@ String Performance::get_monitor_name(Monitor p_monitor) const {
 		"navigation/edges_merged",
 		"navigation/edges_connected",
 		"navigation/edges_free",
-
+		"pipeline/compilations_mesh",
+		"pipeline/compilations_surface",
+		"pipeline/compilations_draw",
+		"pipeline/compilations_specialization",
 	};
 
 	return names[p_monitor];
@@ -181,6 +188,14 @@ double Performance::get_monitor(Monitor p_monitor) const {
 			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_TEXTURE_MEM_USED);
 		case RENDER_BUFFER_MEM_USED:
 			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_BUFFER_MEM_USED);
+		case PIPELINE_COMPILATIONS_MESH:
+			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_MESH);
+		case PIPELINE_COMPILATIONS_SURFACE:
+			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE);
+		case PIPELINE_COMPILATIONS_DRAW:
+			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW);
+		case PIPELINE_COMPILATIONS_SPECIALIZATION:
+			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION);
 		case PHYSICS_2D_ACTIVE_OBJECTS:
 			return PhysicsServer2D::get_singleton()->get_process_info(PhysicsServer2D::INFO_ACTIVE_OBJECTS);
 		case PHYSICS_2D_COLLISION_PAIRS:

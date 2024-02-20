@@ -552,6 +552,8 @@ public:
 		ShaderCompiler compiler_sky;
 	} shaders;
 
+	virtual bool can_create_resources_async() const override;
+
 	/* GLOBAL SHADER UNIFORM API */
 
 	void _update_global_shader_uniforms();

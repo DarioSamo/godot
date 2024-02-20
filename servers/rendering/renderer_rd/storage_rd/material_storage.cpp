@@ -1184,6 +1184,10 @@ MaterialStorage::~MaterialStorage() {
 	singleton = nullptr;
 }
 
+bool MaterialStorage::can_create_resources_async() const {
+	return true;
+}
+
 bool MaterialStorage::free(RID p_rid) {
 	if (owns_shader(p_rid)) {
 		shader_free(p_rid);
@@ -2025,6 +2029,7 @@ void MaterialStorage::_material_uniform_set_erased(void *p_material) {
 }
 
 void MaterialStorage::_material_queue_update(Material *material, bool p_uniform, bool p_texture) {
+	MutexLock lock(material_update_list_mutex);
 	material->uniform_dirty = material->uniform_dirty || p_uniform;
 	material->texture_dirty = material->texture_dirty || p_texture;
 
@@ -2036,6 +2041,7 @@ void MaterialStorage::_material_queue_update(Material *material, bool p_uniform,
 }
 
 void MaterialStorage::_update_queued_materials() {
+	MutexLock lock(material_update_list_mutex);
 	while (material_update_list.first()) {
 		Material *material = material_update_list.first()->self();
 		bool uniforms_changed = false;
