@@ -40,6 +40,12 @@
 #include "rendering_device_driver_vulkan.h"
 #include "vulkan_hooks.h"
 
+// Note: symbols are not available in MinGW and old MSVC import libraries.
+// GUID values from https://github.com/microsoft/DirectX-Headers/blob/7a9f4d06911d30eecb56a4956dab29dcca2709ed/include/directx/d3d12.idl#L5877-L5881
+const GUID CLSID_D3D12DeviceFactoryGodot = { 0x114863bf, 0xc386, 0x4aee, { 0xb3, 0x9d, 0x8f, 0x0b, 0xbb, 0x06, 0x29, 0x55 } };
+const GUID CLSID_D3D12DebugGodot = { 0xf2352aeb, 0xdd84, 0x49fe, { 0xb9, 0x7b, 0xa9, 0xdc, 0xfd, 0xcc, 0x1b, 0x4f } };
+const GUID CLSID_D3D12SDKConfigurationGodot = { 0x7cda6aca, 0xa03e, 0x49c8, { 0x94, 0x58, 0x03, 0x34, 0xd2, 0x0e, 0x07, 0xce } };
+
 RenderingContextDriverVulkan::RenderingContextDriverVulkan() {
 	// Empty constructor.
 }
@@ -56,6 +62,24 @@ RenderingContextDriverVulkan::~RenderingContextDriverVulkan() {
 	if (instance != VK_NULL_HANDLE) {
 		vkDestroyInstance(instance, nullptr);
 	}
+
+#ifdef WINDOWS_ENABLED
+	if (d3d12_device_factory != nullptr) {
+		d3d12_device_factory->Release();
+	}
+
+	if (dxgi_factory != nullptr) {
+		dxgi_factory->Release();
+	}
+
+	if (lib_d3d12) {
+		FreeLibrary(lib_d3d12);
+	}
+
+	if (lib_dxgi) {
+		FreeLibrary(lib_dxgi);
+	}
+#endif
 }
 
 Error RenderingContextDriverVulkan::_initialize_vulkan_version() {
@@ -502,6 +526,7 @@ Error RenderingContextDriverVulkan::_initialize_devices() {
 		driver_device.name = String::utf8(props.deviceName);
 		driver_device.vendor = Vendor(props.vendorID);
 		driver_device.type = DeviceType(props.deviceType);
+		driver_device.id = props.deviceID;
 
 		uint32_t queue_family_properties_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[i], &queue_family_properties_count, nullptr);
@@ -514,6 +539,103 @@ Error RenderingContextDriverVulkan::_initialize_devices() {
 
 	return OK;
 }
+
+#ifdef WINDOWS_ENABLED
+
+Error RenderingContextDriverVulkan::_initialize_d3d12_device_factory() {
+	uint32_t agility_sdk_version = GLOBAL_GET("rendering/rendering_device/d3d12/agility_sdk_version");
+	String agility_sdk_path = String(".\\") + Engine::get_singleton()->get_architecture_name();
+
+	lib_d3d12 = LoadLibraryW(L"D3D12.dll");
+	ERR_FAIL_NULL_V(lib_d3d12, ERR_CANT_CREATE);
+
+	lib_dxgi = LoadLibraryW(L"DXGI.dll");
+	ERR_FAIL_NULL_V(lib_dxgi, ERR_CANT_CREATE);
+
+	// Note: symbol is not available in MinGW import library.
+	PFN_D3D12_GET_INTERFACE d3d_D3D12GetInterface = (PFN_D3D12_GET_INTERFACE)(void *)GetProcAddress(lib_d3d12, "D3D12GetInterface");
+	if (!d3d_D3D12GetInterface) {
+		return OK; // Fallback to the system loader.
+	}
+
+	ID3D12SDKConfiguration *sdk_config = nullptr;
+	if (SUCCEEDED(d3d_D3D12GetInterface(CLSID_D3D12SDKConfigurationGodot, IID_PPV_ARGS(&sdk_config)))) {
+		ID3D12SDKConfiguration1 *sdk_config1 = nullptr;
+		if (SUCCEEDED(sdk_config->QueryInterface(&sdk_config1))) {
+			if (SUCCEEDED(sdk_config1->CreateDeviceFactory(agility_sdk_version, agility_sdk_path.ascii().get_data(), IID_PPV_ARGS(&d3d12_device_factory)))) {
+				d3d_D3D12GetInterface(CLSID_D3D12DeviceFactoryGodot, IID_PPV_ARGS(&d3d12_device_factory));
+			} else if (SUCCEEDED(sdk_config1->CreateDeviceFactory(agility_sdk_version, ".\\", IID_PPV_ARGS(&d3d12_device_factory)))) {
+				d3d_D3D12GetInterface(CLSID_D3D12DeviceFactoryGodot, IID_PPV_ARGS(&d3d12_device_factory));
+			}
+			sdk_config1->Release();
+		}
+		sdk_config->Release();
+	}
+
+	return OK;
+}
+
+Error RenderingContextDriverVulkan::_initialize_dxgi_devices() {
+	typedef HRESULT(WINAPI * PFN_DXGI_CREATE_DXGI_FACTORY2)(UINT, REFIID, void **);
+	PFN_DXGI_CREATE_DXGI_FACTORY2 dxgi_CreateDXGIFactory2 = (PFN_DXGI_CREATE_DXGI_FACTORY2)(void *)GetProcAddress(lib_dxgi, "CreateDXGIFactory2");
+	ERR_FAIL_NULL_V(dxgi_CreateDXGIFactory2, ERR_CANT_CREATE);
+
+	HRESULT res = dxgi_CreateDXGIFactory2(0, IID_PPV_ARGS(&dxgi_factory));
+	ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+	// Enumerate all possible adapters.
+	LocalVector<IDXGIAdapter1 *> adapters;
+	IDXGIAdapter1 *adapter = nullptr;
+	do {
+		adapter = create_dxgi_adapter(adapters.size());
+		if (adapter != nullptr) {
+			adapters.push_back(adapter);
+		}
+	} while (adapter != nullptr);
+
+	ERR_FAIL_COND_V_MSG(adapters.is_empty(), ERR_CANT_CREATE, "Adapters enumeration reported zero accessible devices.");
+
+	// Fill the device descriptions with the adapters.
+	dxgi_driver_devices.resize(adapters.size());
+	for (uint32_t i = 0; i < adapters.size(); ++i) {
+		DXGI_ADAPTER_DESC1 desc = {};
+		adapters[i]->GetDesc1(&desc);
+
+		Device &device = dxgi_driver_devices[i];
+		device.name = desc.Description;
+		device.vendor = Vendor(desc.VendorId);
+		device.id = desc.DeviceId;
+
+		if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+			device.type = DEVICE_TYPE_CPU;
+		} else {
+			const bool has_dedicated_vram = desc.DedicatedVideoMemory > 0;
+			device.type = has_dedicated_vram ? DEVICE_TYPE_DISCRETE_GPU : DEVICE_TYPE_INTEGRATED_GPU;
+		}
+	}
+
+	// Release all created adapters.
+	for (uint32_t i = 0; i < adapters.size(); ++i) {
+		adapters[i]->Release();
+	}
+
+	IDXGIFactory5 *factory_5 = nullptr;
+	res = dxgi_factory->QueryInterface(IID_PPV_ARGS(&factory_5));
+	if (SUCCEEDED(res)) {
+		// The type is important as in general, sizeof(bool) != sizeof(BOOL).
+		BOOL feature_supported = FALSE;
+		res = factory_5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &feature_supported, sizeof(feature_supported));
+		if (SUCCEEDED(res)) {
+			tearing_supported = feature_supported;
+		} else {
+			ERR_PRINT("CheckFeatureSupport failed with error " + vformat("0x%08ux", (uint64_t)res) + ".");
+		}
+	}
+
+	return OK;
+}
+
+#endif
 
 bool RenderingContextDriverVulkan::_use_validation_layers() const {
 	return Engine::get_singleton()->is_validation_layers_enabled();
@@ -562,6 +684,14 @@ Error RenderingContextDriverVulkan::initialize() {
 	err = _initialize_devices();
 	ERR_FAIL_COND_V(err != OK, err);
 
+#ifdef WINDOWS_ENABLED
+	err = _initialize_d3d12_device_factory();
+	ERR_FAIL_COND_V(err != OK, err);
+
+	err = _initialize_dxgi_devices();
+	ERR_FAIL_COND_V(err != OK, err);
+#endif
+
 	return OK;
 }
 
@@ -577,6 +707,10 @@ uint32_t RenderingContextDriverVulkan::device_get_count() const {
 bool RenderingContextDriverVulkan::device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const {
 	DEV_ASSERT(p_device_index < physical_devices.size());
 
+#ifdef WINDOWS_ENABLED
+	// All devices should support presenting to any surface.
+	return true;
+#else
 	// Check if any of the queues supported by the device supports presenting to the window's surface.
 	const VkPhysicalDevice physical_device = physical_devices[p_device_index];
 	const DeviceQueueFamilies &queue_families = device_queue_families[p_device_index];
@@ -587,6 +721,7 @@ bool RenderingContextDriverVulkan::device_supports_present(uint32_t p_device_ind
 	}
 
 	return false;
+#endif
 }
 
 RenderingDeviceDriver *RenderingContextDriverVulkan::driver_create() {
@@ -642,7 +777,9 @@ bool RenderingContextDriverVulkan::surface_get_needs_resize(SurfaceID p_surface)
 
 void RenderingContextDriverVulkan::surface_destroy(SurfaceID p_surface) {
 	Surface *surface = (Surface *)(p_surface);
+#ifndef WINDOWS_ENABLED
 	vkDestroySurfaceKHR(instance, surface->vk_surface, nullptr);
+#endif
 	memdelete(surface);
 }
 
@@ -673,14 +810,85 @@ VkQueueFamilyProperties RenderingContextDriverVulkan::queue_family_get(uint32_t 
 bool RenderingContextDriverVulkan::queue_family_supports_present(VkPhysicalDevice p_physical_device, uint32_t p_queue_family_index, SurfaceID p_surface) const {
 	DEV_ASSERT(p_physical_device != VK_NULL_HANDLE);
 	DEV_ASSERT(p_surface != 0);
+
+#ifdef WINDOWS_ENABLED
+	// TODO: Return true if the queue supports graphics.
+	return true;
+#else
 	Surface *surface = (Surface *)(p_surface);
 	VkBool32 present_supported = false;
 	VkResult err = vkGetPhysicalDeviceSurfaceSupportKHR(p_physical_device, p_queue_family_index, surface->vk_surface, &present_supported);
 	return err == VK_SUCCESS && present_supported;
+#endif
 }
 
 const RenderingContextDriverVulkan::Functions &RenderingContextDriverVulkan::functions_get() const {
 	return functions;
 }
+
+#ifdef WINDOWS_ENABLED
+
+IDXGIAdapter1 *RenderingContextDriverVulkan::create_dxgi_adapter(uint32_t p_adapter_index) const {
+	IDXGIFactory6 *factory_6 = nullptr;
+	HRESULT res = dxgi_factory->QueryInterface(IID_PPV_ARGS(&factory_6));
+
+	// TODO: Use IDXCoreAdapterList, which gives more comprehensive information.
+	IDXGIAdapter1 *adapter = nullptr;
+	if (SUCCEEDED(res)) {
+		if (factory_6->EnumAdapterByGpuPreference(p_adapter_index, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter)) == DXGI_ERROR_NOT_FOUND) {
+			return nullptr;
+		}
+	} else {
+		if (dxgi_factory->EnumAdapters1(p_adapter_index, &adapter) == DXGI_ERROR_NOT_FOUND) {
+			return nullptr;
+		}
+	}
+
+	return adapter;
+}
+
+ID3D12Device *RenderingContextDriverVulkan::create_d3d12_device(IDXGIAdapter1 *p_adapter) const {
+	ID3D12Device *d3d12_device = nullptr;
+	HRESULT res;
+	if (d3d12_device_factory != nullptr) {
+		res = d3d12_device_factory->CreateDevice(p_adapter, IID_PPV_ARGS(&d3d12_device));
+	} else {
+		PFN_D3D12_CREATE_DEVICE d3d_D3D12CreateDevice = (PFN_D3D12_CREATE_DEVICE)(void *)GetProcAddress(lib_d3d12, "D3D12CreateDevice");
+		ERR_FAIL_NULL_V(d3d_D3D12CreateDevice, nullptr);
+
+		res = d3d_D3D12CreateDevice(p_adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d12_device));
+	}
+
+	ERR_FAIL_COND_V_MSG(!SUCCEEDED(res), nullptr, "D3D12CreateDevice failed with error " + vformat("0x%08ux", (uint64_t)res) + ".");
+
+	return d3d12_device;
+}
+
+int32_t RenderingContextDriverVulkan::find_dxgi_adapter_for_device(uint32_t p_device_index) const {
+	DEV_ASSERT(p_device_index < driver_devices.size());
+
+	const Device &vulkan_device = driver_devices[p_device_index];
+	for (uint32_t i = 0; i < dxgi_driver_devices.size(); i++) {
+		if (vulkan_device.vendor == dxgi_driver_devices[i].vendor && vulkan_device.id == dxgi_driver_devices[i].id) {
+			return i;
+		}
+	}
+
+	ERR_FAIL_V_MSG(-1, "Unable to find a matching DXGI device for the Vulkan device.");
+}
+
+ID3D12DeviceFactory *RenderingContextDriverVulkan::device_factory_get() const {
+	return d3d12_device_factory;
+}
+
+IDXGIFactory2 *RenderingContextDriverVulkan::dxgi_factory_get() const {
+	return dxgi_factory;
+}
+
+bool RenderingContextDriverVulkan::get_tearing_supported() const {
+	return tearing_supported;
+}
+
+#endif
 
 #endif // VULKAN_ENABLED

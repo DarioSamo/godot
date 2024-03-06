@@ -77,6 +77,7 @@ public:
 		String name = "Unknown";
 		Vendor vendor = VENDOR_UNKNOWN;
 		DeviceType type = DEVICE_TYPE_OTHER;
+		uint32_t id = 0;
 	};
 
 	virtual ~RenderingContextDriver();

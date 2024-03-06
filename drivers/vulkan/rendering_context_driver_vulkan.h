@@ -41,6 +41,12 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#ifdef WINDOWS_ENABLED
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#undef MemoryBarrier
+#endif
+
 class RenderingContextDriverVulkan : public RenderingContextDriver {
 public:
 	struct Functions {
@@ -106,6 +112,18 @@ private:
 	Error _initialize_instance();
 	Error _initialize_devices();
 
+#ifdef WINDOWS_ENABLED
+	TightLocalVector<Device> dxgi_driver_devices;
+	ID3D12DeviceFactory *d3d12_device_factory = nullptr;
+	IDXGIFactory2 *dxgi_factory = nullptr;
+	HMODULE lib_d3d12 = nullptr;
+	HMODULE lib_dxgi = nullptr;
+	bool tearing_supported = false;
+
+	Error _initialize_d3d12_device_factory();
+	Error _initialize_dxgi_devices();
+#endif
+
 	// Static callbacks.
 	static VKAPI_ATTR VkBool32 VKAPI_CALL _debug_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT p_message_severity, VkDebugUtilsMessageTypeFlagsEXT p_message_type, const VkDebugUtilsMessengerCallbackDataEXT *p_callback_data, void *p_user_data);
 	static VKAPI_ATTR VkBool32 VKAPI_CALL _debug_report_callback(VkDebugReportFlagsEXT p_flags, VkDebugReportObjectTypeEXT p_object_type, uint64_t p_object, size_t p_location, int32_t p_message_code, const char *p_layer_prefix, const char *p_message, void *p_user_data);
@@ -138,7 +156,11 @@ public:
 
 	// Vulkan-only methods.
 	struct Surface {
+#ifdef WINDOWS_ENABLED
+		HWND hwnd = NULL;
+#else
 		VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+#endif
 		uint32_t width = 0;
 		uint32_t height = 0;
 		DisplayServer::VSyncMode vsync_mode = DisplayServer::VSYNC_ENABLED;
@@ -151,6 +173,15 @@ public:
 	VkQueueFamilyProperties queue_family_get(uint32_t p_device_index, uint32_t p_queue_family_index) const;
 	bool queue_family_supports_present(VkPhysicalDevice p_physical_device, uint32_t p_queue_family_index, SurfaceID p_surface) const;
 	const Functions &functions_get() const;
+
+#ifdef WINDOWS_ENABLED
+	IDXGIAdapter1 *create_dxgi_adapter(uint32_t p_adapter_index) const;
+	ID3D12Device *create_d3d12_device(IDXGIAdapter1 *p_adapter) const;
+	int32_t find_dxgi_adapter_for_device(uint32_t p_device_index) const;
+	ID3D12DeviceFactory *device_factory_get() const;
+	IDXGIFactory2 *dxgi_factory_get() const;
+	bool get_tearing_supported() const;
+#endif
 
 	RenderingContextDriverVulkan();
 	virtual ~RenderingContextDriverVulkan() override;

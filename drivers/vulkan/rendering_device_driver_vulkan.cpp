@@ -445,6 +445,11 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 		_register_requested_device_extension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME, true);
 	}
 
+#ifdef WINDOWS_ENABLED
+	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, false);
+#endif
+
 	uint32_t device_extension_count = 0;
 	VkResult err = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &device_extension_count, nullptr);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
@@ -858,6 +863,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 	VkPhysicalDeviceVulkan11Features vulkan_1_1_features = {};
 	VkPhysicalDevice16BitStorageFeaturesKHR storage_features = {};
 	VkPhysicalDeviceMultiviewFeatures multiview_features = {};
+	VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore_features = {};
 	const bool enable_1_2_features = physical_device_properties.apiVersion >= VK_API_VERSION_1_2;
 	if (enable_1_2_features) {
 		// In Vulkan 1.2 and newer we use a newer struct to enable various features.
@@ -876,6 +882,11 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		vulkan_1_1_features.samplerYcbcrConversion = 0;
 		vulkan_1_1_features.shaderDrawParameters = 0;
 		create_info_next = &vulkan_1_1_features;
+
+		timeline_semaphore_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+		timeline_semaphore_features.pNext = create_info_next;
+		timeline_semaphore_features.timelineSemaphore = true;
+		create_info_next = &timeline_semaphore_features;
 	} else {
 		// On Vulkan 1.0 and 1.1 we use our older structs to initialize these features.
 		storage_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES_KHR;
@@ -1064,6 +1075,7 @@ bool RenderingDeviceDriverVulkan::_release_image_semaphore(CommandQueue *p_comma
 		p_command_queue->image_semaphores_swap_chains[p_semaphore_index] = nullptr;
 
 		if (p_release_on_swap_chain) {
+#ifndef WINDOWS_ENABLED
 			// Remove the acquired semaphore from the swap chain's vectors.
 			for (uint32_t i = 0; i < swap_chain->command_queues_acquired.size(); i++) {
 				if (swap_chain->command_queues_acquired[i] == p_command_queue && swap_chain->command_queues_acquired_semaphores[i] == p_semaphore_index) {
@@ -1072,6 +1084,7 @@ bool RenderingDeviceDriverVulkan::_release_image_semaphore(CommandQueue *p_comma
 					break;
 				}
 			}
+#endif
 		}
 
 		return true;
@@ -1112,10 +1125,38 @@ void RenderingDeviceDriverVulkan::_set_object_name(VkObjectType p_object_type, u
 	}
 }
 
+#ifdef WINDOWS_ENABLED
+
+Error RenderingDeviceDriverVulkan::_initialize_dxgi_device(uint32_t p_dxgi_adapter_index) {
+	dxgi_adapter = context_driver->create_dxgi_adapter(p_dxgi_adapter_index);
+	ERR_FAIL_NULL_V(dxgi_adapter, ERR_CANT_CREATE);
+
+	return OK;
+}
+
+Error RenderingDeviceDriverVulkan::_initialize_d3d12_device() {
+	d3d12_device = context_driver->create_d3d12_device(dxgi_adapter);
+	ERR_FAIL_NULL_V(d3d12_device, ERR_CANT_CREATE);
+
+	return OK;
+}
+
+Error RenderingDeviceDriverVulkan::_initialize_d3d12_command_queue() {
+	D3D12_COMMAND_QUEUE_DESC queue_desc = {};
+	queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	HRESULT res = d3d12_device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&d3d12_command_queue));
+	ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+	return OK;
+}
+
+#endif
+
 Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t p_frame_count) {
 	context_device = context_driver->device_get(p_device_index);
 	physical_device = context_driver->physical_device_get(p_device_index);
 	vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
+	vkGetPhysicalDeviceMemoryProperties(physical_device, &physical_device_memory_properties);
 
 	frame_count = p_frame_count;
 
@@ -1147,6 +1188,20 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 
 	err = _initialize_pipeline_cache();
 	ERR_FAIL_COND_V(err != OK, err);
+
+#ifdef WINDOWS_ENABLED
+	int32_t adapter_index = context_driver->find_dxgi_adapter_for_device(p_device_index);
+	if (adapter_index >= 0) {
+		err = _initialize_dxgi_device(uint32_t(adapter_index));
+		ERR_FAIL_COND_V(err != OK, err);
+
+		err = _initialize_d3d12_device();
+		ERR_FAIL_COND_V(err != OK, err);
+
+		err = _initialize_d3d12_command_queue();
+		ERR_FAIL_COND_V(err != OK, err);
+	}
+#endif
 
 	max_descriptor_sets_per_pool = GLOBAL_GET("rendering/rendering_device/vulkan/max_descriptors_per_pool");
 
@@ -2161,6 +2216,12 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		wait_semaphores_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 	}
 
+#ifdef WINDOWS_ENABLED
+	HRESULT res;
+	ID3D12Fence *wait_fence = nullptr;
+	uint64_t wait_value = 0;
+#endif
+
 	if (p_cmd_buffers.size() > 0) {
 		thread_local LocalVector<VkCommandBuffer> command_buffers;
 		thread_local LocalVector<VkSemaphore> signal_semaphores;
@@ -2177,12 +2238,42 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 
 		VkSemaphore present_semaphore = VK_NULL_HANDLE;
 		if (p_swap_chains.size() > 0) {
+#ifdef WINDOWS_ENABLED
+			if (command_queue->present_fence == nullptr) {
+				res = d3d12_device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&command_queue->present_fence));
+				ERR_FAIL_COND_V(!SUCCEEDED(res), FAILED);
+
+				res = d3d12_device->CreateSharedHandle(command_queue->present_fence, NULL, GENERIC_ALL, NULL, &command_queue->present_handle);
+				ERR_FAIL_COND_V(!SUCCEEDED(res), FAILED);
+
+				VkSemaphoreTypeCreateInfo type_info = {};
+				type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+				type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+
+				VkSemaphoreCreateInfo create_info = {};
+				create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+				create_info.pNext = &type_info;
+				err = vkCreateSemaphore(vk_device, &create_info, nullptr, &command_queue->present_semaphore);
+				ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
+
+				VkImportSemaphoreWin32HandleInfoKHR handle_info = {};
+				handle_info.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR;
+				handle_info.semaphore = command_queue->present_semaphore;
+				handle_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT;
+				handle_info.handle = command_queue->present_handle;
+				err = vkImportSemaphoreWin32HandleKHR(vk_device, &handle_info);
+				ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
+			}
+
+			wait_fence = command_queue->present_fence;
+			wait_value = ++command_queue->present_value;
+			signal_semaphores.push_back(command_queue->present_semaphore);
+#else
 			if (command_queue->present_semaphores.is_empty()) {
 				// Create the semaphores used for presentation if they haven't been created yet.
 				VkSemaphore semaphore = VK_NULL_HANDLE;
 				VkSemaphoreCreateInfo create_info = {};
 				create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
 				for (uint32_t i = 0; i < frame_count; i++) {
 					err = vkCreateSemaphore(vk_device, &create_info, nullptr, &semaphore);
 					ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
@@ -2196,6 +2287,7 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 			present_semaphore = command_queue->present_semaphores[command_queue->present_semaphore_index];
 			signal_semaphores.push_back(present_semaphore);
 			command_queue->present_semaphore_index = (command_queue->present_semaphore_index + 1) % command_queue->present_semaphores.size();
+#endif
 		}
 
 		VkSubmitInfo submit_info = {};
@@ -2207,6 +2299,26 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		submit_info.pCommandBuffers = command_buffers.ptr();
 		submit_info.signalSemaphoreCount = signal_semaphores.size();
 		submit_info.pSignalSemaphores = signal_semaphores.ptr();
+
+#ifdef WINDOWS_ENABLED
+		thread_local LocalVector<uint64_t> wait_semaphore_values;
+		thread_local LocalVector<uint64_t> signal_semaphore_values;
+		VkTimelineSemaphoreSubmitInfo timeline_info = {};
+		if (wait_fence != nullptr) {
+			wait_semaphore_values.clear();
+			signal_semaphore_values.clear();
+			wait_semaphore_values.resize(wait_semaphores.size());
+			signal_semaphore_values.resize(signal_semaphores.size());
+			signal_semaphore_values[signal_semaphore_values.size() - 1] = wait_value;
+
+			timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+			timeline_info.waitSemaphoreValueCount = wait_semaphore_values.size();
+			timeline_info.pWaitSemaphoreValues = wait_semaphore_values.ptr();
+			timeline_info.signalSemaphoreValueCount = signal_semaphore_values.size();
+			timeline_info.pSignalSemaphoreValues = signal_semaphore_values.ptr();
+			submit_info.pNext = &timeline_info;
+		}
+#endif
 
 		device_queue.submit_mutex.lock();
 		err = vkQueueSubmit(device_queue.queue, 1, &submit_info, vk_fence);
@@ -2224,14 +2336,33 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 			command_queue->pending_semaphores_for_fence.clear();
 		}
 
+#ifndef WINDOWS_ENABLED
 		if (present_semaphore != VK_NULL_HANDLE) {
 			// If command buffers were executed, swap chains must wait on the present semaphore used by the command queue.
 			wait_semaphores.clear();
 			wait_semaphores.push_back(present_semaphore);
 		}
+#endif
 	}
 
 	if (p_swap_chains.size() > 0) {
+#ifdef WINDOWS_ENABLED
+		if (wait_fence != nullptr) {
+			d3d12_command_queue->Wait(wait_fence, wait_value);
+		}
+
+		bool any_present_failed = false;
+		for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
+			SwapChain *swap_chain = (SwapChain *)(p_swap_chains[i].id);
+			res = swap_chain->dxgi_swap_chain->Present(swap_chain->sync_interval, swap_chain->present_flags);
+			if (!SUCCEEDED(res)) {
+				print_verbose(vformat("D3D12: Presenting swapchain failed with error 0x%08ux.", (uint64_t)res));
+				any_present_failed = true;
+			}
+		}
+
+		ERR_FAIL_COND_V(any_present_failed, FAILED);
+#else
 		thread_local LocalVector<VkSwapchainKHR> swapchains;
 		thread_local LocalVector<uint32_t> image_indices;
 		thread_local LocalVector<VkResult> results;
@@ -2290,6 +2421,7 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		// every frame.
 
 		ERR_FAIL_COND_V(err != VK_SUCCESS && err != VK_SUBOPTIMAL_KHR, FAILED);
+#endif
 	}
 
 	return OK;
@@ -2300,10 +2432,16 @@ void RenderingDeviceDriverVulkan::command_queue_free(CommandQueueID p_cmd_queue)
 
 	CommandQueue *command_queue = (CommandQueue *)(p_cmd_queue.id);
 
+#ifdef WINDOWS_ENABLED
+	if (command_queue->present_semaphore != VK_NULL_HANDLE) {
+		vkDestroySemaphore(vk_device, command_queue->present_semaphore, nullptr);
+	}
+#else
 	// Erase all the semaphores used for presentation.
 	for (VkSemaphore semaphore : command_queue->present_semaphores) {
 		vkDestroySemaphore(vk_device, semaphore, nullptr);
 	}
+#endif
 
 	// Erase all the semaphores used for image acquisition.
 	for (VkSemaphore semaphore : command_queue->image_semaphores) {
@@ -2420,6 +2558,311 @@ void RenderingDeviceDriverVulkan::command_buffer_execute_secondary(CommandBuffer
 /********************/
 /**** SWAP CHAIN ****/
 /********************/
+
+#ifdef WINDOWS_ENABLED
+
+void RenderingDeviceDriverVulkan::_swap_chain_release(SwapChain *p_swap_chain) {
+	_swap_chain_release_buffers(p_swap_chain);
+
+	if (p_swap_chain->dxgi_swap_chain != nullptr) {
+		p_swap_chain->dxgi_swap_chain->Release();
+		p_swap_chain->dxgi_swap_chain = nullptr;
+	}
+}
+
+void RenderingDeviceDriverVulkan::_swap_chain_release_buffers(SwapChain *p_swap_chain) {
+	for (VkImageView view : p_swap_chain->image_views) {
+		vkDestroyImageView(vk_device, view, nullptr);
+	}
+
+	for (VkImage image : p_swap_chain->images) {
+		vkDestroyImage(vk_device, image, nullptr);
+	}
+
+	for (VkDeviceMemory memory : p_swap_chain->image_memories) {
+		vkFreeMemory(vk_device, memory, nullptr);
+	}
+
+	for (HANDLE shared_handle : p_swap_chain->shared_handles) {
+		CloseHandle(shared_handle);
+	}
+
+	for (ID3D12Resource *render_target : p_swap_chain->render_targets) {
+		render_target->Release();
+	}
+
+	for (RDD::FramebufferID framebuffer : p_swap_chain->framebuffers) {
+		framebuffer_free(framebuffer);
+	}
+
+	p_swap_chain->image_views.clear();
+	p_swap_chain->images.clear();
+	p_swap_chain->image_memories.clear();
+	p_swap_chain->shared_handles.clear();
+	p_swap_chain->render_targets.clear();
+	p_swap_chain->framebuffers.clear();
+}
+
+RenderingDeviceDriver::SwapChainID RenderingDeviceDriverVulkan::swap_chain_create(RenderingContextDriver::SurfaceID p_surface) {
+	// Create the render pass for the chosen format.
+	VkAttachmentDescription2KHR attachment = {};
+	attachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR;
+	attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	VkAttachmentReference2KHR color_reference = {};
+	color_reference.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2_KHR;
+	color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription2KHR subpass = {};
+	subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2_KHR;
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &color_reference;
+
+	VkRenderPassCreateInfo2KHR pass_info = {};
+	pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2_KHR;
+	pass_info.attachmentCount = 1;
+	pass_info.pAttachments = &attachment;
+	pass_info.subpassCount = 1;
+	pass_info.pSubpasses = &subpass;
+
+	VkRenderPass render_pass = VK_NULL_HANDLE;
+	VkResult err = _create_render_pass(vk_device, &pass_info, nullptr, &render_pass);
+	ERR_FAIL_COND_V(err != VK_SUCCESS, SwapChainID());
+
+	// Create the empty swap chain until it is resized.
+	SwapChain *swap_chain = memnew(SwapChain);
+	swap_chain->surface = p_surface;
+	swap_chain->format = attachment.format;
+	swap_chain->render_pass = RenderPassID(render_pass);
+	return SwapChainID(swap_chain);
+}
+
+Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, uint32_t p_desired_framebuffer_count) {
+	DEV_ASSERT(p_cmd_queue.id != 0);
+	DEV_ASSERT(p_swap_chain.id != 0);
+
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	RenderingContextDriverVulkan::Surface *surface = (RenderingContextDriverVulkan::Surface *)(swap_chain->surface);
+	if (surface->width == 0 || surface->height == 0) {
+		// Very likely the window is minimized, don't create a swap chain.
+		return ERR_SKIP;
+	}
+
+	HRESULT res;
+	const bool is_tearing_supported = false; //context_driver->get_tearing_supported();
+	UINT sync_interval = 0;
+	UINT present_flags = 0;
+	UINT creation_flags = 0;
+	switch (surface->vsync_mode) {
+		case DisplayServer::VSYNC_MAILBOX: {
+			sync_interval = 1;
+			present_flags = DXGI_PRESENT_RESTART;
+		} break;
+		case DisplayServer::VSYNC_ENABLED: {
+			sync_interval = 1;
+			present_flags = 0;
+		} break;
+		case DisplayServer::VSYNC_DISABLED: {
+			sync_interval = 0;
+			present_flags = is_tearing_supported ? DXGI_PRESENT_ALLOW_TEARING : 0;
+			creation_flags = is_tearing_supported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+		} break;
+		case DisplayServer::VSYNC_ADAPTIVE: // Unsupported.
+		default:
+			sync_interval = 1;
+			present_flags = 0;
+			break;
+	}
+
+	print_verbose("Using swap chain flags: " + itos(creation_flags) + ", sync interval: " + itos(sync_interval) + ", present flags: " + itos(present_flags));
+
+	if (swap_chain->dxgi_swap_chain != nullptr && creation_flags != swap_chain->creation_flags) {
+		// The swap chain must be recreated if the creation flags are different.
+		_swap_chain_release(swap_chain);
+	}
+
+	DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
+	if (swap_chain->dxgi_swap_chain != nullptr) {
+		_swap_chain_release_buffers(swap_chain);
+		res = swap_chain->dxgi_swap_chain->ResizeBuffers(p_desired_framebuffer_count, 0, 0, DXGI_FORMAT_UNKNOWN, creation_flags);
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_UNAVAILABLE);
+	} else {
+		swap_chain_desc.BufferCount = p_desired_framebuffer_count;
+		swap_chain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // TODO
+		swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		swap_chain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		swap_chain_desc.SampleDesc.Count = 1;
+		swap_chain_desc.Flags = creation_flags;
+		swap_chain_desc.Scaling = DXGI_SCALING_NONE;
+
+		IDXGISwapChain1 *swap_chain_1 = nullptr;
+		res = context_driver->dxgi_factory_get()->CreateSwapChainForHwnd(d3d12_command_queue, surface->hwnd, &swap_chain_desc, nullptr, nullptr, &swap_chain_1);
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+		res = swap_chain_1->QueryInterface(IID_PPV_ARGS(&swap_chain->dxgi_swap_chain));
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+		res = context_driver->dxgi_factory_get()->MakeWindowAssociation(surface->hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+	}
+
+	res = swap_chain->dxgi_swap_chain->GetDesc1(&swap_chain_desc);
+	ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+	ERR_FAIL_COND_V(swap_chain_desc.BufferCount == 0, ERR_CANT_CREATE);
+
+	surface->width = swap_chain_desc.Width;
+	surface->height = swap_chain_desc.Height;
+
+	swap_chain->creation_flags = creation_flags;
+	swap_chain->sync_interval = sync_interval;
+	swap_chain->present_flags = present_flags;
+
+	// Retrieve the render targets associated to the swap chain and recreate the framebuffers.
+	swap_chain->render_targets.reserve(swap_chain_desc.BufferCount);
+	swap_chain->shared_handles.reserve(swap_chain_desc.BufferCount);
+	swap_chain->framebuffers.reserve(swap_chain_desc.BufferCount);
+	swap_chain->images.reserve(swap_chain_desc.BufferCount);
+	swap_chain->image_views.reserve(swap_chain_desc.BufferCount);
+	for (uint32_t i = 0; i < swap_chain_desc.BufferCount; i++) {
+		ID3D12Resource *render_target = nullptr;
+		res = swap_chain->dxgi_swap_chain->GetBuffer(i, IID_PPV_ARGS(&render_target));
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+		swap_chain->render_targets.push_back(render_target);
+
+		HANDLE shared_handle = NULL;
+		res = d3d12_device->CreateSharedHandle(render_target, NULL, GENERIC_ALL, NULL, &shared_handle);
+		ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
+
+		swap_chain->shared_handles.push_back(shared_handle);
+
+		VkMemoryWin32HandlePropertiesKHR handle_properties = {};
+		handle_properties.sType = VK_STRUCTURE_TYPE_MEMORY_WIN32_HANDLE_PROPERTIES_KHR;
+
+		VkResult vk_res = vkGetMemoryWin32HandlePropertiesKHR(vk_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT, shared_handle, &handle_properties);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkGetMemoryWin32HandlePropertiesKHR failed with error " + itos(vk_res) + ".");
+
+		int32_t memory_type_index = -1;
+		for (uint32_t i = 0; i < physical_device_memory_properties.memoryTypeCount; i++) {
+			if ((handle_properties.memoryTypeBits & (1 << i)) && (physical_device_memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+				memory_type_index = i;
+				break;
+			}
+		}
+
+		ERR_FAIL_COND_V(memory_type_index < 0, ERR_CANT_CREATE);
+
+		VkExternalMemoryImageCreateInfo external_info = {};
+		external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+		external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+
+		D3D12_RESOURCE_DESC render_target_desc = render_target->GetDesc();
+		VkImageCreateInfo create_info = {};
+		create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		create_info.pNext = &external_info;
+		create_info.imageType = VK_IMAGE_TYPE_2D;
+		create_info.format = swap_chain->format;
+		create_info.extent.width = render_target_desc.Width;
+		create_info.extent.height = render_target_desc.Height;
+		create_info.extent.depth = 1;
+		create_info.mipLevels = 1;
+		create_info.arrayLayers = 1;
+		create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+		create_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+		VkImage image = VK_NULL_HANDLE;
+		vk_res = vkCreateImage(vk_device, &create_info, nullptr, &image);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkCreateImage failed with error " + itos(vk_res) + ".");
+
+		swap_chain->images.push_back(image);
+
+		VkMemoryRequirements memory_requirements = {};
+		vkGetImageMemoryRequirements(vk_device, image, &memory_requirements);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkGetImageMemoryRequirements failed with error " + itos(vk_res) + ".");
+
+		VkImportMemoryWin32HandleInfoKHR import_info = {};
+		import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+		import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+		import_info.handle = shared_handle;
+
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.pNext = &import_info;
+		alloc_info.allocationSize = memory_requirements.size;
+		alloc_info.memoryTypeIndex = uint32_t(memory_type_index);
+
+		VkDeviceMemory image_memory = VK_NULL_HANDLE;
+		vk_res = vkAllocateMemory(vk_device, &alloc_info, nullptr, &image_memory);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkAllocateMemory failed with error " + itos(vk_res) + ".");
+
+		swap_chain->image_memories.push_back(image_memory);
+
+		vk_res = vkBindImageMemory(vk_device, image, image_memory, 0);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkBindImageMemory failed with error " + itos(vk_res) + ".");
+
+		VkImageViewCreateInfo view_create_info = {};
+		view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		view_create_info.image = image;
+		view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		view_create_info.format = swap_chain->format;
+		view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
+		view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
+		view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
+		view_create_info.components.a = VK_COMPONENT_SWIZZLE_A;
+		view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		view_create_info.subresourceRange.levelCount = 1;
+		view_create_info.subresourceRange.layerCount = 1;
+
+		VkImageView image_view = VK_NULL_HANDLE;
+		vk_res = vkCreateImageView(vk_device, &view_create_info, nullptr, &image_view);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkCreateImageView failed with error " + itos(vk_res) + ".");
+
+		swap_chain->image_views.push_back(image_view);
+
+		VkFramebufferCreateInfo fb_create_info = {};
+		fb_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		fb_create_info.renderPass = VkRenderPass(swap_chain->render_pass.id);
+		fb_create_info.pAttachments = &image_view;
+		fb_create_info.attachmentCount = 1;
+		fb_create_info.width = surface->width;
+		fb_create_info.height = surface->height;
+		fb_create_info.layers = 1;
+
+		VkFramebuffer framebuffer = VK_NULL_HANDLE;
+		vk_res = vkCreateFramebuffer(vk_device, &fb_create_info, nullptr, &framebuffer);
+		ERR_FAIL_COND_V_MSG(vk_res != VK_SUCCESS, ERR_CANT_CREATE, "vkCreateFramebuffer failed with error " + itos(vk_res) + ".");
+
+		swap_chain->framebuffers.push_back(RDD::FramebufferID(framebuffer));
+	}
+
+	// Once everything's been created correctly, indicate the surface no longer needs to be resized.
+	context_driver->surface_set_needs_resize(swap_chain->surface, false);
+
+	return OK;
+}
+
+RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) {
+	DEV_ASSERT(p_swap_chain.id != 0);
+
+	const SwapChain *swap_chain = (const SwapChain *)(p_swap_chain.id);
+	if (context_driver->surface_get_needs_resize(swap_chain->surface)) {
+		r_resize_required = true;
+		return FramebufferID();
+	}
+
+	const uint32_t buffer_index = swap_chain->dxgi_swap_chain->GetCurrentBackBufferIndex();
+	return swap_chain->framebuffers[buffer_index];
+}
+
+#else
 
 void RenderingDeviceDriverVulkan::_swap_chain_release(SwapChain *swap_chain) {
 	// Destroy views and framebuffers associated to the swapchain's images.
@@ -2781,6 +3224,8 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(C
 	// Return the corresponding framebuffer to the new current image.
 	return swap_chain->framebuffers[swap_chain->image_index];
 }
+
+#endif
 
 RDD::RenderPassID RenderingDeviceDriverVulkan::swap_chain_get_render_pass(SwapChainID p_swap_chain) {
 	DEV_ASSERT(p_swap_chain.id != 0);
@@ -4949,6 +5394,20 @@ RenderingDeviceDriverVulkan::RenderingDeviceDriverVulkan(RenderingContextDriverV
 }
 
 RenderingDeviceDriverVulkan::~RenderingDeviceDriverVulkan() {
+#ifdef WINDOWS_ENABLED
+	if (d3d12_command_queue != nullptr) {
+		d3d12_command_queue->Release();
+	}
+
+	if (d3d12_device != nullptr) {
+		d3d12_device->Release();
+	}
+
+	if (dxgi_adapter != nullptr) {
+		dxgi_adapter->Release();
+	}
+#endif
+
 	while (small_allocs_pools.size()) {
 		HashMap<uint32_t, VmaPool>::Iterator E = small_allocs_pools.begin();
 		vmaDestroyPool(allocator, E->value);

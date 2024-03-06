@@ -49,6 +49,11 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#ifdef WINDOWS_ENABLED
+#include <dxgi1_6.h>
+#undef MemoryBarrier
+#endif
+
 // Design principles:
 // - Vulkan structs are zero-initialized and fields not requiring a non-zero value are omitted (except in cases where expresivity reasons apply).
 class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
@@ -118,6 +123,7 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	uint32_t frame_count = 1;
 	VkPhysicalDevice physical_device = VK_NULL_HANDLE;
 	VkPhysicalDeviceProperties physical_device_properties = {};
+	VkPhysicalDeviceMemoryProperties physical_device_memory_properties = {};
 	VkPhysicalDeviceFeatures physical_device_features = {};
 	VkPhysicalDeviceFeatures requested_device_features = {};
 	HashMap<CharString, bool> requested_device_extensions;
@@ -145,6 +151,16 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	bool _release_image_semaphore(CommandQueue *p_command_queue, uint32_t p_semaphore_index, bool p_release_on_swap_chain);
 	bool _recreate_image_semaphore(CommandQueue *p_command_queue, uint32_t p_semaphore_index, bool p_release_on_swap_chain);
 	void _set_object_name(VkObjectType p_object_type, uint64_t p_object_handle, String p_object_name);
+
+#ifdef WINDOWS_ENABLED
+	IDXGIAdapter1 *dxgi_adapter = nullptr;
+	ID3D12Device *d3d12_device = nullptr;
+	ID3D12CommandQueue *d3d12_command_queue = nullptr;
+
+	Error _initialize_dxgi_device(uint32_t p_dxgi_adapter_index);
+	Error _initialize_d3d12_device();
+	Error _initialize_d3d12_command_queue();
+#endif
 
 public:
 	Error initialize(uint32_t p_device_index, uint32_t p_frame_count) override final;
@@ -277,7 +293,6 @@ public:
 	// ----- QUEUE -----
 private:
 	struct CommandQueue {
-		LocalVector<VkSemaphore> present_semaphores;
 		LocalVector<VkSemaphore> image_semaphores;
 		LocalVector<SwapChain *> image_semaphores_swap_chains;
 		LocalVector<uint32_t> pending_semaphores_for_execute;
@@ -286,7 +301,15 @@ private:
 		LocalVector<Pair<Fence *, uint32_t>> image_semaphores_for_fences;
 		uint32_t queue_family = 0;
 		uint32_t queue_index = 0;
+#ifdef WINDOWS_ENABLED
+		VkSemaphore present_semaphore = VK_NULL_HANDLE;
+		HANDLE present_handle = NULL;
+		ID3D12Fence *present_fence = nullptr;
+		uint64_t present_value = 0;
+#else
+		LocalVector<VkSemaphore> present_semaphores;
 		uint32_t present_semaphore_index = 0;
+#endif
 	};
 
 public:
@@ -320,20 +343,31 @@ public:
 
 private:
 	struct SwapChain {
-		VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 		RenderingContextDriver::SurfaceID surface = RenderingContextDriver::SurfaceID();
 		VkFormat format = VK_FORMAT_UNDEFINED;
 		VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		TightLocalVector<VkImage> images;
 		TightLocalVector<VkImageView> image_views;
+		TightLocalVector<VkDeviceMemory> image_memories;
 		TightLocalVector<FramebufferID> framebuffers;
-		LocalVector<CommandQueue *> command_queues_acquired;
-		LocalVector<uint32_t> command_queues_acquired_semaphores;
 		RenderPassID render_pass;
 		uint32_t image_index = 0;
+#ifdef WINDOWS_ENABLED
+		IDXGISwapChain3 *dxgi_swap_chain = nullptr;
+		TightLocalVector<ID3D12Resource *> render_targets;
+		TightLocalVector<HANDLE> shared_handles;
+		UINT present_flags = 0;
+		UINT sync_interval = 1;
+		UINT creation_flags = 0;
+#else
+		VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
+		LocalVector<CommandQueue *> command_queues_acquired;
+		LocalVector<uint32_t> command_queues_acquired_semaphores;
+#endif
 	};
 
 	void _swap_chain_release(SwapChain *p_swap_chain);
+	void _swap_chain_release_buffers(SwapChain *p_swap_chain);
 
 public:
 	virtual SwapChainID swap_chain_create(RenderingContextDriver::SurfaceID p_surface) override final;

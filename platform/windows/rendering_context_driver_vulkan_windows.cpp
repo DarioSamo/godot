@@ -58,6 +58,7 @@ RenderingContextDriverVulkanWindows::~RenderingContextDriverVulkanWindows() {
 RenderingContextDriver::SurfaceID RenderingContextDriverVulkanWindows::surface_create(const void *p_platform_data) {
 	const WindowPlatformData *wpd = (const WindowPlatformData *)(p_platform_data);
 
+#ifndef WINDOWS_ENABLED
 	VkWin32SurfaceCreateInfoKHR create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
 	create_info.hinstance = wpd->instance;
@@ -66,9 +67,16 @@ RenderingContextDriver::SurfaceID RenderingContextDriverVulkanWindows::surface_c
 	VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 	VkResult err = vkCreateWin32SurfaceKHR(instance_get(), &create_info, nullptr, &vk_surface);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, SurfaceID());
+#endif
 
 	Surface *surface = memnew(Surface);
+
+#ifdef WINDOWS_ENABLED
+	surface->hwnd = wpd->window;
+#else
 	surface->vk_surface = vk_surface;
+#endif
+
 	return SurfaceID(surface);
 }
 
