@@ -3886,7 +3886,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material_chain(
 	while (material->next_pass.is_valid()) {
 		RID next_pass = material->next_pass;
 		material = static_cast<SceneShaderForwardClustered::MaterialData *>(material_storage->material_get_data(next_pass, RendererRD::MaterialStorage::SHADER_TYPE_3D));
-		if (!material || !material->shader_data->valid) {
+		if (!material || !material->shader_data->is_valid()) {
 			break;
 		}
 		if (ginstance->data->dirty_dependencies) {
@@ -3906,7 +3906,7 @@ void RenderForwardClustered::_geometry_instance_add_surface(GeometryInstanceForw
 
 	if (m_src.is_valid()) {
 		material = static_cast<SceneShaderForwardClustered::MaterialData *>(material_storage->material_get_data(m_src, RendererRD::MaterialStorage::SHADER_TYPE_3D));
-		if (!material || !material->shader_data->valid) {
+		if (!material || !material->shader_data->is_valid()) {
 			material = nullptr;
 		}
 	}
@@ -3928,7 +3928,7 @@ void RenderForwardClustered::_geometry_instance_add_surface(GeometryInstanceForw
 		m_src = ginstance->data->material_overlay;
 
 		material = static_cast<SceneShaderForwardClustered::MaterialData *>(material_storage->material_get_data(m_src, RendererRD::MaterialStorage::SHADER_TYPE_3D));
-		if (material && material->shader_data->valid) {
+		if (material && material->shader_data->is_valid()) {
 			if (ginstance->data->dirty_dependencies) {
 				material_storage->material_update_dependency(m_src, &ginstance->data->dependency_tracker);
 			}

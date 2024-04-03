@@ -43,7 +43,6 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	//compile
 
 	code = p_code;
-	valid = false;
 	ubo_size = 0;
 	uniforms.clear();
 
@@ -186,9 +185,6 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	texture_uniforms = gen_code.texture_uniforms;
 
 	pipeline_hash_map.clear_pipelines();
-
-	// TODO(Pipeline): Delay validity check until it is actually requested somewhere to not stall for shader compilation.
-	valid = true;
 }
 
 bool SceneShaderForwardClustered::ShaderData::is_animated() const {
@@ -412,6 +408,13 @@ RID SceneShaderForwardClustered::ShaderData::get_shader_variant(PipelineVersion 
 
 	ShaderVersion shader_version = _get_shader_version(p_pipeline_version, p_color_pass_flags, p_ubershader);
 	return SceneShaderForwardClustered::singleton->shader.version_get_shader(version, shader_version);
+}
+
+bool SceneShaderForwardClustered::ShaderData::is_valid() const {
+	MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
+	ERR_FAIL_NULL_V(SceneShaderForwardClustered::singleton, false);
+
+	return SceneShaderForwardClustered::singleton->shader.version_is_valid(version);
 }
 
 SceneShaderForwardClustered::ShaderData::ShaderData() :

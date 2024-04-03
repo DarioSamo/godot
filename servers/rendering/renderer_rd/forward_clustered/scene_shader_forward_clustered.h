@@ -192,7 +192,6 @@ public:
 		void _create_pipeline(PipelineKey p_pipeline_key);
 		PipelineHashMapRD<PipelineKey, ShaderData, void (ShaderData::*)(PipelineKey)> pipeline_hash_map;
 
-		bool valid = false;
 		RID version;
 		uint64_t vertex_input_mask = 0;
 
@@ -272,6 +271,7 @@ public:
 		ShaderVersion _get_shader_version(PipelineVersion p_pipeline_version, uint32_t p_color_pass_flags, bool p_ubershader) const;
 		RD::PolygonCullMode get_cull_mode_from_cull_variant(CullVariant p_cull_variant);
 		RID get_shader_variant(PipelineVersion p_pipeline_version, uint32_t p_color_pass_flags, bool p_ubershader) const;
+		bool is_valid() const;
 
 		SelfList<ShaderData> shader_list_element;
 		ShaderData();
