@@ -479,7 +479,11 @@ void ShaderMaterial::_check_material_rid() const {
 		for (KeyValue<StringName, Variant> param : param_cache) {
 			if (param.value.get_type() == Variant::OBJECT) {
 				RID tex_rid = param.value;
-				RS::get_singleton()->material_set_param(_get_material(), param.key, tex_rid.is_valid() ? tex_rid : Variant());
+				if (tex_rid.is_valid()) {
+					RS::get_singleton()->material_set_param(_get_material(), param.key, tex_rid);
+				} else {
+					RS::get_singleton()->material_set_param(_get_material(), param.key, Variant());
+				}
 			} else {
 				RS::get_singleton()->material_set_param(_get_material(), param.key, param.value);
 			}
