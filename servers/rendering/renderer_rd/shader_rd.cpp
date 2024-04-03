@@ -39,7 +39,7 @@
 #include "servers/rendering/rendering_device.h"
 #include "thirdparty/misc/smolv.h"
 
-#define SHADER_CACHE_ENABLED 0
+#define SHADER_CACHE_ENABLED 1
 
 void ShaderRD::_add_stage(const char *p_code, StageType p_stage_type) {
 	Vector<String> lines = String(p_code).split("\n");
@@ -563,7 +563,6 @@ void ShaderRD::_compile_version_end(Version *p_version, int p_group) {
 	}
 #if SHADER_CACHE_ENABLED
 	else if (shader_cache_dir_valid) {
-		// Save shader cache.
 		_save_to_cache(p_version, p_group);
 	}
 #endif
