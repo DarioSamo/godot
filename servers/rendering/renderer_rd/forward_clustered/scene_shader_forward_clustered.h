@@ -131,14 +131,6 @@ public:
 	};
 
 	struct ShaderData : public RendererRD::MaterialStorage::ShaderData {
-		enum BlendMode { //used internally
-			BLEND_MODE_MIX,
-			BLEND_MODE_ADD,
-			BLEND_MODE_SUB,
-			BLEND_MODE_MUL,
-			BLEND_MODE_ALPHA_TO_COVERAGE
-		};
-
 		enum DepthDraw {
 			DEPTH_DRAW_DISABLED,
 			DEPTH_DRAW_OPAQUE,

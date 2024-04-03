@@ -155,15 +155,6 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	} shader;
 
 	struct CanvasShaderData : public RendererRD::MaterialStorage::ShaderData {
-		enum BlendMode { //used internally
-			BLEND_MODE_MIX,
-			BLEND_MODE_ADD,
-			BLEND_MODE_SUB,
-			BLEND_MODE_MUL,
-			BLEND_MODE_PMALPHA,
-			BLEND_MODE_DISABLED,
-		};
-
 		bool valid = false;
 		RID version;
 		PipelineVariants pipeline_variants;

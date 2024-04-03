@@ -258,63 +258,7 @@ void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeli
 		blend_mode = BLEND_MODE_ALPHA_TO_COVERAGE;
 	}
 
-	// TODO: These can be shared betweeen Forward+ and Mobile.
-	RD::PipelineColorBlendState::Attachment blend_attachment;
-
-	switch (blend_mode) {
-		case BLEND_MODE_MIX: {
-			blend_attachment.enable_blend = true;
-			blend_attachment.alpha_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.color_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			blend_attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
-			blend_attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-
-		} break;
-		case BLEND_MODE_ADD: {
-			blend_attachment.enable_blend = true;
-			blend_attachment.alpha_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.color_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
-			blend_attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
-			uses_blend_alpha = true; //force alpha used because of blend
-
-		} break;
-		case BLEND_MODE_SUB: {
-			blend_attachment.enable_blend = true;
-			blend_attachment.alpha_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
-			blend_attachment.color_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
-			blend_attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
-			blend_attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
-			uses_blend_alpha = true; //force alpha used because of blend
-
-		} break;
-		case BLEND_MODE_MUL: {
-			blend_attachment.enable_blend = true;
-			blend_attachment.alpha_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.color_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_COLOR;
-			blend_attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ZERO;
-			blend_attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
-			blend_attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
-			uses_blend_alpha = true; //force alpha used because of blend
-		} break;
-		case BLEND_MODE_ALPHA_TO_COVERAGE: {
-			blend_attachment.enable_blend = true;
-			blend_attachment.alpha_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.color_blend_op = RD::BLEND_OP_ADD;
-			blend_attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
-			blend_attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			blend_attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
-			blend_attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
-		}
-	}
-
+	RD::PipelineColorBlendState::Attachment blend_attachment = blend_mode_to_blend_attachment(BlendMode(blend_mode), uses_blend_alpha);
 	RD::PipelineColorBlendState blend_state_blend;
 	blend_state_blend.attachments.push_back(blend_attachment);
 	RD::PipelineColorBlendState blend_state_opaque = RD::PipelineColorBlendState::create_disabled(1);

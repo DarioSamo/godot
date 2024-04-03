@@ -637,6 +637,79 @@ bool MaterialStorage::ShaderData::is_parameter_texture(const StringName &p_param
 	return uniforms[p_param].texture_order >= 0;
 }
 
+RD::PipelineColorBlendState::Attachment MaterialStorage::ShaderData::blend_mode_to_blend_attachment(BlendMode p_mode, bool &r_uses_blend_alpha) {
+	RD::PipelineColorBlendState::Attachment attachment;
+
+	switch (p_mode) {
+		case BLEND_MODE_MIX: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+
+		} break;
+		case BLEND_MODE_ADD: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			r_uses_blend_alpha = true;
+
+		} break;
+		case BLEND_MODE_SUB: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+			attachment.color_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			r_uses_blend_alpha = true;
+
+		} break;
+		case BLEND_MODE_MUL: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_COLOR;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ZERO;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+			r_uses_blend_alpha = true;
+		} break;
+		case BLEND_MODE_ALPHA_TO_COVERAGE: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+		} break;
+		case BLEND_MODE_PREMULTIPLIED_ALPHA: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		} break;
+		case BLEND_MODE_DISABLED:
+		default: {
+			// Use default attachment values.
+		} break;
+	}
+
+	return attachment;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // MaterialStorage::MaterialData
 
