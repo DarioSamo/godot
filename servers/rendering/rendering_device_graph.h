@@ -582,6 +582,8 @@ private:
 	bool command_synchronization_pending = false;
 	BarrierGroup barrier_group;
 	bool driver_honors_barriers = false;
+	bool driver_secondaries_as_workaround = false;
+	RDD::CommandQueueFamilyID driver_secondary_queue_family;
 	TightLocalVector<Frame> frames;
 	uint32_t frame = 0;
 
@@ -619,7 +621,7 @@ private:
 public:
 	RenderingDeviceGraph();
 	~RenderingDeviceGraph();
-	void initialize(RDD *p_driver, uint32_t p_frame_count, RDD::CommandQueueFamilyID p_secondary_command_queue_family, uint32_t p_secondary_command_buffers_per_frame);
+	void initialize(RDD *p_driver, uint32_t p_frame_count, RDD::CommandQueueFamilyID p_secondary_command_queue_family, uint32_t p_secondary_command_buffers_per_frame, bool p_driver_secondaries_as_workaround);
 	void finalize();
 	void begin();
 	void add_buffer_clear(RDD::BufferID p_dst, ResourceTracker *p_dst_tracker, uint32_t p_offset, uint32_t p_size);

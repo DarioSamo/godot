@@ -1229,7 +1229,7 @@ void RenderingDeviceGraph::_print_compute_list(const uint8_t *p_instruction_data
 	}
 }
 
-void RenderingDeviceGraph::initialize(RDD *p_driver, uint32_t p_frame_count, RDD::CommandQueueFamilyID p_secondary_command_queue_family, uint32_t p_secondary_command_buffers_per_frame) {
+void RenderingDeviceGraph::initialize(RDD *p_driver, uint32_t p_frame_count, RDD::CommandQueueFamilyID p_secondary_command_queue_family, uint32_t p_secondary_command_buffers_per_frame, bool p_driver_secondaries_as_workaround) {
 	driver = p_driver;
 	frames.resize(p_frame_count);
 
@@ -1245,6 +1245,8 @@ void RenderingDeviceGraph::initialize(RDD *p_driver, uint32_t p_frame_count, RDD
 	}
 
 	driver_honors_barriers = driver->api_trait_get(RDD::API_TRAIT_HONORS_PIPELINE_BARRIERS);
+	driver_secondary_queue_family = p_secondary_command_queue_family;
+	driver_secondaries_as_workaround = p_driver_secondaries_as_workaround;
 }
 
 void RenderingDeviceGraph::finalize() {
@@ -1631,10 +1633,20 @@ void RenderingDeviceGraph::add_draw_list_usages(VectorView<ResourceTracker *> p_
 
 void RenderingDeviceGraph::add_draw_list_end() {
 	// Arbitrary size threshold to evaluate if it'd be best to record the draw list on the background as a secondary buffer.
+	// When using secondaries as a driver workaround, the condition always passes.
 	const uint32_t instruction_data_threshold_for_secondary = 16384;
 	RDD::CommandBufferType command_buffer_type;
 	uint32_t &secondary_buffers_used = frames[frame].secondary_command_buffers_used;
-	if (draw_instruction_list.data.size() > instruction_data_threshold_for_secondary && secondary_buffers_used < frames[frame].secondary_command_buffers.size()) {
+	if (driver_secondaries_as_workaround || (draw_instruction_list.data.size() > instruction_data_threshold_for_secondary && secondary_buffers_used < frames[frame].secondary_command_buffers.size())) {
+		while (secondary_buffers_used >= frames[frame].secondary_command_buffers.size()) {
+			// Create secondary command buffers if there's not enough available.
+			SecondaryCommandBuffer secondary;
+			secondary.command_pool = driver->command_pool_create(driver_secondary_queue_family, RDD::COMMAND_BUFFER_TYPE_SECONDARY);
+			secondary.command_buffer = driver->command_buffer_create(secondary.command_pool);
+			secondary.task = WorkerThreadPool::INVALID_TASK_ID;
+			frames[frame].secondary_command_buffers.push_back(secondary);
+		}
+
 		// Copy the current instruction list data into another array that will be used by the secondary command buffer worker.
 		SecondaryCommandBuffer &secondary = frames[frame].secondary_command_buffers[secondary_buffers_used];
 		secondary.render_pass = draw_instruction_list.render_pass;
@@ -1642,8 +1654,13 @@ void RenderingDeviceGraph::add_draw_list_end() {
 		secondary.instruction_data.resize(draw_instruction_list.data.size());
 		memcpy(secondary.instruction_data.ptr(), draw_instruction_list.data.ptr(), draw_instruction_list.data.size());
 
-		// Run a background task for recording the secondary command buffer.
-		secondary.task = WorkerThreadPool::get_singleton()->add_template_task(this, &RenderingDeviceGraph::_run_secondary_command_buffer_task, &secondary, true);
+		if (driver_secondaries_as_workaround) {
+			// Record the secondary command buffer directly inside of the caller thread if it's using them as a driver fallback.
+			_run_secondary_command_buffer_task(&secondary);
+		} else {
+			// Run a background task for recording the secondary command buffer.
+			secondary.task = WorkerThreadPool::get_singleton()->add_template_task(this, &RenderingDeviceGraph::_run_secondary_command_buffer_task, &secondary, true);
+		}
 
 		// Clear the instruction list and add a single command for executing the secondary command buffer instead.
 		draw_instruction_list.data.clear();

@@ -5051,7 +5051,7 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 	driver->command_buffer_begin(frames[0].draw_command_buffer);
 
 	// Create draw graph and start it initialized as well.
-	draw_graph.initialize(driver, frames.size(), main_queue_family, SECONDARY_COMMAND_BUFFERS_PER_FRAME);
+	draw_graph.initialize(driver, frames.size(), main_queue_family, SECONDARY_COMMAND_BUFFERS_PER_FRAME, true);
 	draw_graph.begin();
 
 	for (uint32_t i = 0; i < frames.size(); i++) {
