@@ -1080,6 +1080,10 @@ UINT RenderingDeviceDriverD3D12::_compute_plane_slice(DataFormat p_format, Textu
 	}
 }
 
+UINT RenderingDeviceDriverD3D12::_compute_subresource_from_layers(TextureInfo *p_texture, const TextureSubresourceLayers &p_layers, uint32_t p_layer_offset) {
+	return D3D12CalcSubresource(p_layers.mipmap, p_layers.base_layer + p_layer_offset, _compute_plane_slice(p_texture->format, p_layers.aspect), p_texture->desc.MipLevels, p_texture->desc.ArraySize());
+}
+
 void RenderingDeviceDriverD3D12::_discard_texture_subresources(const TextureInfo *p_tex_info, const CommandBufferInfo *p_cmd_buf_info) {
 	uint32_t planes = 1;
 	if ((p_tex_info->desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
@@ -4354,43 +4358,35 @@ void RenderingDeviceDriverD3D12::command_copy_texture(CommandBufferID p_cmd_buff
 	TextureInfo *src_tex_info = (TextureInfo *)p_src_texture.id;
 	TextureInfo *dst_tex_info = (TextureInfo *)p_dst_texture.id;
 
+	// Batch all barrier transitions for the textures before performing the copies.
 	for (uint32_t i = 0; i < p_regions.size(); i++) {
-		UINT src_subresource = D3D12CalcSubresource(
-				p_regions[i].src_subresources.mipmap,
-				p_regions[i].src_subresources.base_layer,
-				_compute_plane_slice(src_tex_info->format, p_regions[i].src_subresources.aspect),
-				src_tex_info->desc.MipLevels,
-				src_tex_info->desc.ArraySize());
-		_resource_transition_batch(src_tex_info, src_subresource, 1, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		uint32_t layer_count = MIN(p_regions[i].src_subresources.layer_count, p_regions[i].dst_subresources.layer_count);
+		for (uint32_t j = 0; j < layer_count; j++) {
+			UINT src_subresource = _compute_subresource_from_layers(src_tex_info, p_regions[i].src_subresources, j);
+			UINT dst_subresource = _compute_subresource_from_layers(dst_tex_info, p_regions[i].dst_subresources, j);
+			_resource_transition_batch(src_tex_info, src_subresource, 1, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			_resource_transition_batch(dst_tex_info, dst_subresource, 1, D3D12_RESOURCE_STATE_COPY_DEST);
+		}
+	}
 
-		UINT dst_subresource = D3D12CalcSubresource(
-				p_regions[i].dst_subresources.mipmap,
-				p_regions[i].dst_subresources.base_layer,
-				_compute_plane_slice(dst_tex_info->format, p_regions[i].dst_subresources.aspect),
-				dst_tex_info->desc.MipLevels,
-				dst_tex_info->desc.ArraySize());
-		_resource_transition_batch(dst_tex_info, dst_subresource, 1, D3D12_RESOURCE_STATE_COPY_DEST);
+	_resource_transitions_flush(cmd_buf_info->cmd_list.Get());
 
-		_resource_transitions_flush(cmd_buf_info->cmd_list.Get());
-
-		CD3DX12_TEXTURE_COPY_LOCATION src_location(src_tex_info->resource, src_subresource);
-		CD3DX12_TEXTURE_COPY_LOCATION dst_location(dst_tex_info->resource, dst_subresource);
-
-		CD3DX12_BOX src_box(
-				p_regions[i].src_offset.x,
-				p_regions[i].src_offset.y,
-				p_regions[i].src_offset.z,
-				p_regions[i].src_offset.x + p_regions[i].size.x,
-				p_regions[i].src_offset.y + p_regions[i].size.y,
-				p_regions[i].src_offset.z + p_regions[i].size.z);
-
-		cmd_buf_info->cmd_list->CopyTextureRegion(
-				&dst_location,
-				p_regions[i].dst_offset.x,
-				p_regions[i].dst_offset.y,
-				p_regions[i].dst_offset.z,
-				&src_location,
-				&src_box);
+	CD3DX12_BOX src_box;
+	for (uint32_t i = 0; i < p_regions.size(); i++) {
+		uint32_t layer_count = MIN(p_regions[i].src_subresources.layer_count, p_regions[i].dst_subresources.layer_count);
+		for (uint32_t j = 0; j < layer_count; j++) {
+			UINT src_subresource = _compute_subresource_from_layers(src_tex_info, p_regions[i].src_subresources, j);
+			UINT dst_subresource = _compute_subresource_from_layers(dst_tex_info, p_regions[i].dst_subresources, j);
+			CD3DX12_TEXTURE_COPY_LOCATION src_location(src_tex_info->resource, src_subresource);
+			CD3DX12_TEXTURE_COPY_LOCATION dst_location(dst_tex_info->resource, dst_subresource);
+			src_box.left = p_regions[i].src_offset.x;
+			src_box.top = p_regions[i].src_offset.y;
+			src_box.front = p_regions[i].src_offset.z;
+			src_box.right = p_regions[i].src_offset.x + p_regions[i].size.x;
+			src_box.bottom = p_regions[i].src_offset.y + p_regions[i].size.y;
+			src_box.back = p_regions[i].src_offset.z + p_regions[i].size.z;
+			cmd_buf_info->cmd_list->CopyTextureRegion(&dst_location, p_regions[i].dst_offset.x, p_regions[i].dst_offset.y, p_regions[i].dst_offset.z, &src_location, &src_box);
+		}
 	}
 }
 
