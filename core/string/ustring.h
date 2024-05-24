@@ -118,7 +118,6 @@ public:
 	Char16String &operator+=(char16_t p_char);
 	int length() const { return size() ? size() - 1 : 0; }
 	const char16_t *get_data() const;
-	operator const char16_t *() const { return get_data(); };
 
 protected:
 	void copy_from(const char16_t *p_cstr);
@@ -160,7 +159,6 @@ public:
 	CharString &operator+=(char p_char);
 	int length() const { return size() ? size() - 1 : 0; }
 	const char *get_data() const;
-	operator const char *() const { return get_data(); };
 
 protected:
 	void copy_from(const char *p_cstr);
@@ -491,6 +489,7 @@ public:
 	String(const wchar_t *p_str, int p_clip_to_len);
 	String(const char32_t *p_str, int p_clip_to_len);
 	String(const StrRange &p_range);
+	String(const CharString &p_str);
 };
 
 bool operator==(const char *p_chr, const String &p_str);

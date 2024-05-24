@@ -474,7 +474,7 @@ _FORCE_INLINE_ void CodeSignRequirements::_parse_key(uint32_t &r_pos, String &r_
 	key.resize(key_size);
 	memcpy(key.ptrw(), blob.ptr() + r_pos + 4, key_size);
 	r_pos += 4 + key_size + PAD(key_size, 4);
-	r_out += "[" + String::utf8(key, key_size) + "]";
+	r_out += "[" + String::utf8(key.get_data(), key_size) + "]";
 #undef _R
 }
 
@@ -531,7 +531,7 @@ _FORCE_INLINE_ void CodeSignRequirements::_parse_value(uint32_t &r_pos, String &
 	key.resize(key_size);
 	memcpy(key.ptrw(), blob.ptr() + r_pos + 4, key_size);
 	r_pos += 4 + key_size + PAD(key_size, 4);
-	r_out += "\"" + String::utf8(key, key_size) + "\"";
+	r_out += "\"" + String::utf8(key.get_data(), key_size) + "\"";
 #undef _R
 }
 

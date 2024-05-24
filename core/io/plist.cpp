@@ -380,20 +380,20 @@ void PListNode::store_text(String &p_stream, uint8_t p_indent) const {
 			p_stream += String("\t").repeat(p_indent);
 			p_stream += "<data>\n";
 			p_stream += String("\t").repeat(p_indent);
-			p_stream += data_string + "\n";
+			p_stream += String(data_string) + "\n";
 			p_stream += String("\t").repeat(p_indent);
 			p_stream += "</data>\n";
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_DATE: {
 			p_stream += String("\t").repeat(p_indent);
 			p_stream += "<date>";
-			p_stream += data_string;
+			p_stream += String(data_string);
 			p_stream += "</date>\n";
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_STRING: {
 			p_stream += String("\t").repeat(p_indent);
 			p_stream += "<string>";
-			p_stream += String::utf8(data_string);
+			p_stream += String::utf8(data_string.get_data());
 			p_stream += "</string>\n";
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_BOOLEAN: {

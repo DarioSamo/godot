@@ -473,9 +473,9 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	for (KeyValue<CharString, bool> &requested_extension : requested_device_extensions) {
 		if (!enabled_device_extension_names.has(requested_extension.key)) {
 			if (requested_extension.value) {
-				ERR_FAIL_V_MSG(ERR_BUG, String("Required extension ") + String::utf8(requested_extension.key) + String(" not found."));
+				ERR_FAIL_V_MSG(ERR_BUG, String("Required extension ") + String::utf8(requested_extension.key.get_data()) + String(" not found."));
 			} else {
-				print_verbose(String("Optional extension ") + String::utf8(requested_extension.key) + String(" not found"));
+				print_verbose(String("Optional extension ") + String::utf8(requested_extension.key.get_data()) + String(" not found"));
 			}
 		}
 	}

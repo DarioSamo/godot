@@ -2470,6 +2470,10 @@ String::String(const StrRange &p_range) {
 	copy_from(p_range.c_str, p_range.len);
 }
 
+String::String(const CharString &p_str) {
+	copy_from(p_str.get_data());
+}
+
 int64_t String::hex_to_int() const {
 	int len = length();
 	if (len == 0) {
@@ -4561,7 +4565,7 @@ String String::uri_decode() const {
 			res += src[i];
 		}
 	}
-	return String::utf8(res);
+	return String::utf8(res.get_data());
 }
 
 String String::c_unescape() const {

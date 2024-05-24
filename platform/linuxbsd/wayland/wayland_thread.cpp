@@ -3862,7 +3862,7 @@ Vector<uint8_t> WaylandThread::selection_get_mime(const String &p_mime) const {
 		return Vector<uint8_t>();
 	}
 
-	return _wl_data_offer_read(wl_display, p_mime.utf8(), ss->wl_data_offer_selection);
+	return _wl_data_offer_read(wl_display, p_mime.utf8().get_data(), ss->wl_data_offer_selection);
 }
 
 bool WaylandThread::primary_has_mime(const String &p_mime) const {
@@ -3905,7 +3905,7 @@ Vector<uint8_t> WaylandThread::primary_get_mime(const String &p_mime) const {
 		return Vector<uint8_t>();
 	}
 
-	return _wp_primary_selection_offer_read(wl_display, p_mime.utf8(), ss->wp_primary_selection_offer);
+	return _wp_primary_selection_offer_read(wl_display, p_mime.utf8().get_data(), ss->wp_primary_selection_offer);
 }
 
 void WaylandThread::primary_set_text(const String &p_text) {

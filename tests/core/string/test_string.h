@@ -98,7 +98,7 @@ TEST_CASE("[String] UTF8") {
 	CHECK(s == u32str);
 
 	CharString cs = (const char *)u8str;
-	CHECK(String::utf8(cs) == s);
+	CHECK(String::utf8(cs.get_data()) == s);
 }
 
 TEST_CASE("[String] UTF16") {
@@ -115,7 +115,7 @@ TEST_CASE("[String] UTF16") {
 	CHECK(s == u32str);
 
 	Char16String cs = u16str;
-	CHECK(String::utf16(cs) == s);
+	CHECK(String::utf16(cs.get_data()) == s);
 }
 
 TEST_CASE("[String] UTF8 with BOM") {
@@ -128,7 +128,7 @@ TEST_CASE("[String] UTF8 with BOM") {
 	CHECK(s == u32str);
 
 	CharString cs = (const char *)u8str;
-	CHECK(String::utf8(cs) == s);
+	CHECK(String::utf8(cs.get_data()) == s);
 }
 
 TEST_CASE("[String] UTF16 with BOM") {
@@ -146,10 +146,10 @@ TEST_CASE("[String] UTF16 with BOM") {
 	CHECK(s == u32str);
 
 	Char16String cs = u16str;
-	CHECK(String::utf16(cs) == s);
+	CHECK(String::utf16(cs.get_data()) == s);
 
 	cs = u16str_swap;
-	CHECK(String::utf16(cs) == s);
+	CHECK(String::utf16(cs.get_data()) == s);
 }
 
 TEST_CASE("[String] UTF8 with CR") {
@@ -177,7 +177,7 @@ TEST_CASE("[String] Invalid UTF8 (non-standard)") {
 	CHECK(s == u32str);
 
 	CharString cs = (const char *)u8str;
-	CHECK(String::utf8(cs) == s);
+	CHECK(String::utf8(cs.get_data()) == s);
 	ERR_PRINT_ON
 }
 
@@ -192,7 +192,7 @@ TEST_CASE("[String] Invalid UTF8 (unrecoverable)") {
 	CHECK(s == u32str);
 
 	CharString cs = (const char *)u8str;
-	CHECK(String::utf8(cs) == s);
+	CHECK(String::utf8(cs.get_data()) == s);
 	ERR_PRINT_ON
 }
 
@@ -207,7 +207,7 @@ TEST_CASE("[String] Invalid UTF16 (non-standard)") {
 	CHECK(s == u32str);
 
 	Char16String cs = u16str;
-	CHECK(String::utf16(cs) == s);
+	CHECK(String::utf16(cs.get_data()) == s);
 	ERR_PRINT_ON
 }
 

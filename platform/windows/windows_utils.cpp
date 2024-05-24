@@ -177,7 +177,7 @@ Error WindowsUtils::copy_and_rename_pdb(const String &p_dll_path) {
 
 			utf8_name.resize(original_path_size - suffix_size + 1); // +1 for the \0
 			utf8_name[utf8_name.size() - 1] = '\0';
-			new_pdb_base_name.parse_utf8(utf8_name);
+			new_pdb_base_name.parse_utf8(utf8_name.get_data());
 			new_pdb_base_name[new_pdb_base_name.length() - 1] = '_'; // Restore the last '_'
 			WARN_PRINT(vformat("The original path size of '%s' in bytes was too small to fit the new name, so it was shortened to '%s%d.pdb'.", pdb_info.path, new_pdb_base_name, max_pdb_names - 1));
 		}
