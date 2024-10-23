@@ -106,20 +106,36 @@ bool sc_use_lightmap_bicubic_filter() {
 	return ((sc_packed_0() >> 7) & 1U) != 0;
 }
 
-uint sc_soft_shadow_samples() {
-	return (sc_packed_0() >> 8) & 15U;
+bool sc_multimesh() {
+	return ((sc_packed_0() >> 8) & 1U) != 0;
 }
 
-uint sc_penumbra_shadow_samples() {
+bool sc_multimesh_format_2d() {
+	return ((sc_packed_0() >> 9) & 1U) != 0;
+}
+
+bool sc_multimesh_has_color() {
+	return ((sc_packed_0() >> 10) & 1U) != 0;
+}
+
+bool sc_multimesh_has_custom_data() {
+	return ((sc_packed_0() >> 11) & 1U) != 0;
+}
+
+uint sc_soft_shadow_samples() {
 	return (sc_packed_0() >> 12) & 15U;
 }
 
-uint sc_directional_soft_shadow_samples() {
+uint sc_penumbra_shadow_samples() {
 	return (sc_packed_0() >> 16) & 15U;
 }
 
-uint sc_directional_penumbra_shadow_samples() {
+uint sc_directional_soft_shadow_samples() {
 	return (sc_packed_0() >> 20) & 15U;
+}
+
+uint sc_directional_penumbra_shadow_samples() {
+	return (sc_packed_0() >> 24) & 15U;
 }
 
 float sc_luminance_multiplier() {
@@ -144,10 +160,6 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define INSTANCE_FLAGS_USE_SH_LIGHTMAP (1 << 9)
 #define INSTANCE_FLAGS_USE_VOXEL_GI (1 << 10)
 #define INSTANCE_FLAGS_PARTICLES (1 << 11)
-#define INSTANCE_FLAGS_MULTIMESH (1 << 12)
-#define INSTANCE_FLAGS_MULTIMESH_FORMAT_2D (1 << 13)
-#define INSTANCE_FLAGS_MULTIMESH_HAS_COLOR (1 << 14)
-#define INSTANCE_FLAGS_MULTIMESH_HAS_CUSTOM_DATA (1 << 15)
 #define INSTANCE_FLAGS_PARTICLE_TRAIL_SHIFT 16
 #define INSTANCE_FLAGS_FADE_SHIFT 24
 //3 bits of stride

@@ -178,6 +178,13 @@ vec3 double_add_vec3(vec3 base_a, vec3 prec_a, vec3 base_b, vec3 prec_b, out vec
 }
 #endif
 
+uint multimesh_stride() {
+	uint stride = sc_multimesh_format_2d() ? 2 : 3;
+	stride += sc_multimesh_has_color() ? 1 : 0;
+	stride += sc_multimesh_has_custom_data() ? 1 : 0;
+	return stride;
+}
+
 void main() {
 	vec4 instance_custom = vec4(0.0);
 #if defined(COLOR_USED)
@@ -208,7 +215,7 @@ void main() {
 	mat4 matrix;
 	mat4 read_model_matrix = model_matrix;
 
-	if (sc_is_multimesh()) {
+	if (sc_multimesh()) {
 		//multimesh, instances are for it
 
 #ifdef USE_PARTICLE_TRAILS
@@ -256,25 +263,10 @@ void main() {
 #endif
 
 #else
-		uint stride = 0;
-		{
-			//TODO implement a small lookup table for the stride
-			if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_FORMAT_2D)) {
-				stride += 2;
-			} else {
-				stride += 3;
-			}
-			if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_HAS_COLOR)) {
-				stride += 1;
-			}
-			if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_HAS_CUSTOM_DATA)) {
-				stride += 1;
-			}
-		}
-
+		uint stride = multimesh_stride();
 		uint offset = stride * gl_InstanceIndex;
 
-		if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_FORMAT_2D)) {
+		if (sc_multimesh_format_2d()) {
 			matrix = mat4(transforms.data[offset + 0], transforms.data[offset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0));
 			offset += 2;
 		} else {
@@ -282,17 +274,16 @@ void main() {
 			offset += 3;
 		}
 
-		if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_HAS_COLOR)) {
+		if (sc_multimesh_has_color()) {
 #ifdef COLOR_USED
 			color_interp *= transforms.data[offset];
 #endif
 			offset += 1;
 		}
 
-		if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_MULTIMESH_HAS_CUSTOM_DATA)) {
+		if (sc_multimesh_has_custom_data()) {
 			instance_custom = transforms.data[offset];
 		}
-
 #endif
 		//transpose
 		matrix = transpose(matrix);
@@ -404,7 +395,7 @@ void main() {
 	// Then we combine the translations from the model matrix and the view matrix using emulated doubles.
 	// We add the result to the vertex and ignore the final lost precision.
 	vec3 model_origin = model_matrix[3].xyz;
-	if (sc_is_multimesh()) {
+	if (sc_multimesh()) {
 		vertex = mat3(matrix) * vertex;
 		model_origin = double_add_vec3(model_origin, model_precision, matrix[3].xyz, vec3(0.0), model_precision);
 	}
