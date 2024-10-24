@@ -122,3 +122,25 @@ GH-98918
 Validate extension JSON: Error: Field 'classes/FileAccess/methods/open_encrypted/arguments': size changed value in new API, from 3 to 4.
 
 Optional argument added to allow setting initialization vector. Compatibility method registered.
+
+
+GH-98670
+--------
+Validate extension JSON: Error: Field 'classes/RenderSceneBuffersRD/methods/create_texture/arguments': size changed value in new API, from 9 to 10.
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments': meta was removed.
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/1': type changed value in new API, from "enum::RenderingDevice.InitialAction" to "bitfield::RenderingDevice.ClearColorFlags".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/2': type changed value in new API, from "enum::RenderingDevice.FinalAction" to "PackedColorArray".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/3': type changed value in new API, from "enum::RenderingDevice.InitialAction" to "bool".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/4': type changed value in new API, from "enum::RenderingDevice.FinalAction" to "float".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/5': default_value changed value in new API, from "PackedColorArray()" to "false".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/5': type changed value in new API, from "PackedColorArray" to "bool".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/6': default_value changed value in new API, from "1.0" to "0".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/6': meta changed value in new API, from "float" to "uint32".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/6': type changed value in new API, from "float" to "int".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/7': default_value changed value in new API, from "0" to "Rect2(0, 0, 0, 0)".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/7': type changed value in new API, from "int" to "Rect2".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/8': default_value changed value in new API, from "Rect2(0, 0, 0, 0)" to "0".
+Validate extension JSON: Error: Field 'classes/RenderingDevice/methods/draw_list_begin/arguments/8': type changed value in new API, from "Rect2" to "int".
+
+Draw lists no longer require the initial and final action for color and depth attachments to be specified.
+Draw lists can now specify if a particular color, depth or stencil attachment should be cleared.

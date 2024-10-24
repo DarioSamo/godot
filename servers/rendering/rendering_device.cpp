@@ -846,6 +846,7 @@ RID RenderingDevice::texture_create(const TextureFormat &p_format, const Texture
 	texture.base_mipmap = 0;
 	texture.base_layer = 0;
 	texture.is_resolve_buffer = format.is_resolve_buffer;
+	texture.is_transient = format.is_transient;
 	texture.usage_flags = format.usage_bits & ~forced_usage_bits;
 	texture.samples = format.samples;
 	texture.allowed_shared_formats = format.shareable_formats;
@@ -948,6 +949,7 @@ RID RenderingDevice::texture_create_shared(const TextureView &p_view, RID p_with
 		tracker->texture_driver_id = texture.shared_fallback->texture;
 		tracker->texture_subresources = texture.barrier_range();
 		tracker->texture_usage = alias_format.usage_bits;
+		tracker->is_transient = texture.is_transient;
 		tracker->reference_count = 1;
 		texture.shared_fallback->texture_tracker = tracker;
 		texture.shared_fallback->revision = 0;
@@ -1127,6 +1129,7 @@ RID RenderingDevice::texture_create_shared_from_slice(const TextureView &p_view,
 		tracker->texture_driver_id = texture.shared_fallback->texture;
 		tracker->texture_subresources = slice_range;
 		tracker->texture_usage = slice_format.usage_bits;
+		tracker->is_transient = slice_format.is_transient;
 		tracker->reference_count = 1;
 		texture.shared_fallback->texture_tracker = tracker;
 		texture.shared_fallback->revision = 0;
@@ -1887,6 +1890,7 @@ RD::TextureFormat RenderingDevice::texture_get_format(RID p_texture) {
 	tf.usage_bits = tex->usage_flags;
 	tf.shareable_formats = tex->allowed_shared_formats;
 	tf.is_resolve_buffer = tex->is_resolve_buffer;
+	tf.is_transient = tex->is_transient;
 
 	return tf;
 }
@@ -2027,6 +2031,32 @@ Error RenderingDevice::texture_resolve_multisample(RID p_from_texture, RID p_to_
 	return OK;
 }
 
+void RenderingDevice::texture_set_transient(RID p_texture, bool p_transient) {
+	ERR_RENDER_THREAD_GUARD();
+
+	Texture *texture = texture_owner.get_or_null(p_texture);
+	ERR_FAIL_NULL(texture);
+
+	texture->is_transient = p_transient;
+
+	if (texture->draw_tracker != nullptr) {
+		texture->draw_tracker->is_transient = p_transient;
+	}
+
+	if (texture->shared_fallback != nullptr && texture->shared_fallback->texture_tracker != nullptr) {
+		texture->shared_fallback->texture_tracker->is_transient = p_transient;
+	}
+}
+
+bool RenderingDevice::texture_is_transient(RID p_texture) {
+	ERR_RENDER_THREAD_GUARD_V(false);
+
+	Texture *texture = texture_owner.get_or_null(p_texture);
+	ERR_FAIL_NULL_V(texture, false);
+
+	return texture->is_transient;
+}
+
 Error RenderingDevice::texture_clear(RID p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers) {
 	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
 
@@ -2080,31 +2110,7 @@ bool RenderingDevice::texture_is_format_supported_for_usage(DataFormat p_format,
 /**** FRAMEBUFFER ****/
 /*********************/
 
-static RDD::AttachmentLoadOp initial_action_to_load_op(RenderingDevice::InitialAction p_action) {
-	switch (p_action) {
-		case RenderingDevice::INITIAL_ACTION_LOAD:
-			return RDD::ATTACHMENT_LOAD_OP_LOAD;
-		case RenderingDevice::INITIAL_ACTION_CLEAR:
-			return RDD::ATTACHMENT_LOAD_OP_CLEAR;
-		case RenderingDevice::INITIAL_ACTION_DISCARD:
-			return RDD::ATTACHMENT_LOAD_OP_DONT_CARE;
-		default:
-			ERR_FAIL_V_MSG(RDD::ATTACHMENT_LOAD_OP_DONT_CARE, "Invalid initial action value (" + itos(p_action) + ")");
-	}
-}
-
-static RDD::AttachmentStoreOp final_action_to_store_op(RenderingDevice::FinalAction p_action) {
-	switch (p_action) {
-		case RenderingDevice::FINAL_ACTION_STORE:
-			return RDD::ATTACHMENT_STORE_OP_STORE;
-		case RenderingDevice::FINAL_ACTION_DISCARD:
-			return RDD::ATTACHMENT_STORE_OP_DONT_CARE;
-		default:
-			ERR_FAIL_V_MSG(RDD::ATTACHMENT_STORE_OP_DONT_CARE, "Invalid final action value (" + itos(p_action) + ")");
-	}
-}
-
-RDD::RenderPassID RenderingDevice::_render_pass_create(const Vector<AttachmentFormat> &p_attachments, const Vector<FramebufferPass> &p_passes, InitialAction p_initial_action, FinalAction p_final_action, InitialAction p_initial_depth_action, FinalAction p_final_depth_action, uint32_t p_view_count, Vector<TextureSamples> *r_samples) {
+RDD::RenderPassID RenderingDevice::_render_pass_create(RenderingDeviceDriver *p_driver, const Vector<AttachmentFormat> &p_attachments, const Vector<FramebufferPass> &p_passes, VectorView<RDD::AttachmentLoadOp> p_load_ops, VectorView<RDD::AttachmentStoreOp> p_store_ops, uint32_t p_view_count, Vector<TextureSamples> *r_samples) {
 	// NOTE:
 	// Before the refactor to RenderingDevice-RenderingDeviceDriver, there was commented out code to
 	// specify dependencies to external subpasses. Since it had been unused for a long timel it wasn't ported
@@ -2114,7 +2120,7 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(const Vector<AttachmentFo
 	attachment_last_pass.resize(p_attachments.size());
 
 	if (p_view_count > 1) {
-		const RDD::MultiviewCapabilities &capabilities = driver->get_multiview_capabilities();
+		const RDD::MultiviewCapabilities &capabilities = p_driver->get_multiview_capabilities();
 
 		// This only works with multiview!
 		ERR_FAIL_COND_V_MSG(!capabilities.is_supported, RDD::RenderPassID(), "Multiview not supported");
@@ -2155,17 +2161,17 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(const Vector<AttachmentFo
 			description.final_layout = RDD::TEXTURE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		} else {
 			if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
-				description.load_op = initial_action_to_load_op(p_initial_action);
-				description.store_op = final_action_to_store_op(p_final_action);
+				description.load_op = p_load_ops[i];
+				description.store_op = p_store_ops[i];
 				description.stencil_load_op = RDD::ATTACHMENT_LOAD_OP_DONT_CARE;
 				description.stencil_store_op = RDD::ATTACHMENT_STORE_OP_DONT_CARE;
 				description.initial_layout = RDD::TEXTURE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 				description.final_layout = RDD::TEXTURE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 			} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-				description.load_op = initial_action_to_load_op(p_initial_depth_action);
-				description.store_op = final_action_to_store_op(p_final_depth_action);
-				description.stencil_load_op = initial_action_to_load_op(p_initial_depth_action);
-				description.stencil_store_op = final_action_to_store_op(p_final_depth_action);
+				description.load_op = p_load_ops[i];
+				description.store_op = p_store_ops[i];
+				description.stencil_load_op = p_load_ops[i];
+				description.stencil_store_op = p_store_ops[i];
 				description.initial_layout = RDD::TEXTURE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 				description.final_layout = RDD::TEXTURE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 			} else {
@@ -2327,10 +2333,21 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(const Vector<AttachmentFo
 		}
 	}
 
-	RDD::RenderPassID render_pass = driver->render_pass_create(attachments, subpasses, subpass_dependencies, p_view_count);
+	RDD::RenderPassID render_pass = p_driver->render_pass_create(attachments, subpasses, subpass_dependencies, p_view_count);
 	ERR_FAIL_COND_V(!render_pass, RDD::RenderPassID());
 
 	return render_pass;
+}
+
+RDD::RenderPassID RenderingDevice::_render_pass_create_from_graph(RenderingDeviceDriver *p_driver, VectorView<RDD::AttachmentLoadOp> p_load_ops, VectorView<RDD::AttachmentStoreOp> p_store_ops, void *p_user_data) {
+	DEV_ASSERT(p_driver != nullptr);
+	DEV_ASSERT(p_user_data != nullptr);
+
+	// The graph delegates the creation of the render pass to the user according to the load and store ops that were determined as necessary after
+	// resolving the dependencies between commands. This function creates a render pass for the framebuffer accordingly.
+	Framebuffer *framebuffer = (Framebuffer *)(p_user_data);
+	const FramebufferFormatKey &key = framebuffer->rendering_device->framebuffer_formats[framebuffer->format_id].E->key();
+	return _render_pass_create(p_driver, key.attachments, key.passes, p_load_ops, p_store_ops, framebuffer->view_count);
 }
 
 RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create(const Vector<AttachmentFormat> &p_format, uint32_t p_view_count) {
@@ -2347,6 +2364,7 @@ RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create(
 	passes.push_back(pass);
 	return framebuffer_format_create_multipass(p_format, passes, p_view_count);
 }
+
 RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create_multipass(const Vector<AttachmentFormat> &p_attachments, const Vector<FramebufferPass> &p_passes, uint32_t p_view_count) {
 	_THREAD_SAFE_METHOD_
 
@@ -2362,14 +2380,21 @@ RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create_
 	}
 
 	Vector<TextureSamples> samples;
-	RDD::RenderPassID render_pass = _render_pass_create(p_attachments, p_passes, INITIAL_ACTION_CLEAR, FINAL_ACTION_STORE, INITIAL_ACTION_CLEAR, FINAL_ACTION_STORE, p_view_count, &samples); // Actions don't matter for this use case.
+	LocalVector<RDD::AttachmentLoadOp> load_ops;
+	LocalVector<RDD::AttachmentStoreOp> store_ops;
+	for (int64_t i = 0; i < p_attachments.size(); i++) {
+		load_ops.push_back(RDD::ATTACHMENT_LOAD_OP_CLEAR);
+		store_ops.push_back(RDD::ATTACHMENT_STORE_OP_STORE);
+	}
 
+	RDD::RenderPassID render_pass = _render_pass_create(driver, p_attachments, p_passes, load_ops, store_ops, p_view_count, &samples); // Actions don't matter for this use case.
 	if (!render_pass) { // Was likely invalid.
 		return INVALID_ID;
 	}
-	FramebufferFormatID id = FramebufferFormatID(framebuffer_format_cache.size()) | (FramebufferFormatID(ID_TYPE_FRAMEBUFFER_FORMAT) << FramebufferFormatID(ID_BASE_SHIFT));
 
+	FramebufferFormatID id = FramebufferFormatID(framebuffer_format_cache.size()) | (FramebufferFormatID(ID_TYPE_FRAMEBUFFER_FORMAT) << FramebufferFormatID(ID_BASE_SHIFT));
 	E = framebuffer_format_cache.insert(key, id);
+
 	FramebufferFormat fb_format;
 	fb_format.E = E;
 	fb_format.render_pass = render_pass;
@@ -2436,15 +2461,24 @@ RID RenderingDevice::framebuffer_create_empty(const Size2i &p_size, TextureSampl
 	_THREAD_SAFE_METHOD_
 
 	Framebuffer framebuffer;
+	framebuffer.rendering_device = this;
 	framebuffer.format_id = framebuffer_format_create_empty(p_samples);
 	ERR_FAIL_COND_V(p_format_check != INVALID_FORMAT_ID && framebuffer.format_id != p_format_check, RID());
 	framebuffer.size = p_size;
 	framebuffer.view_count = 1;
 
+	RDG::FramebufferCache *framebuffer_cache = RDG::framebuffer_cache_create();
+	framebuffer_cache->width = p_size.width;
+	framebuffer_cache->height = p_size.height;
+	framebuffer.framebuffer_cache = framebuffer_cache;
+
 	RID id = framebuffer_owner.make_rid(framebuffer);
 #ifdef DEV_ENABLED
 	set_resource_name(id, "RID:" + itos(id.get_id()));
 #endif
+
+	framebuffer_cache->render_pass_creation_user_data = framebuffer_owner.get_or_null(id);
+
 	return id;
 }
 
@@ -2485,6 +2519,8 @@ RID RenderingDevice::framebuffer_create_multipass(const Vector<RID> &p_texture_a
 	_THREAD_SAFE_METHOD_
 
 	Vector<AttachmentFormat> attachments;
+	LocalVector<RDD::TextureID> textures;
+	LocalVector<RDG::ResourceTracker *> trackers;
 	attachments.resize(p_texture_attachments.size());
 	Size2i size;
 	bool size_set = false;
@@ -2493,6 +2529,7 @@ RID RenderingDevice::framebuffer_create_multipass(const Vector<RID> &p_texture_a
 		Texture *texture = texture_owner.get_or_null(p_texture_attachments[i]);
 		if (!texture) {
 			af.usage_flags = AttachmentFormat::UNUSED_ATTACHMENT;
+			trackers.push_back(nullptr);
 		} else {
 			ERR_FAIL_COND_V_MSG(texture->layers != p_view_count, RID(), "Layers of our texture doesn't match view count for this framebuffer");
 
@@ -2514,6 +2551,11 @@ RID RenderingDevice::framebuffer_create_multipass(const Vector<RID> &p_texture_a
 			af.format = texture->format;
 			af.samples = texture->samples;
 			af.usage_flags = texture->usage_flags;
+
+			_texture_make_mutable(texture, p_texture_attachments[i]);
+
+			textures.push_back(texture->driver_id);
+			trackers.push_back(texture->draw_tracker);
 		}
 		attachments.write[i] = af;
 	}
@@ -2529,10 +2571,18 @@ RID RenderingDevice::framebuffer_create_multipass(const Vector<RID> &p_texture_a
 			"The format used to check this framebuffer differs from the intended framebuffer format.");
 
 	Framebuffer framebuffer;
+	framebuffer.rendering_device = this;
 	framebuffer.format_id = format_id;
 	framebuffer.texture_ids = p_texture_attachments;
 	framebuffer.size = size;
 	framebuffer.view_count = p_view_count;
+
+	RDG::FramebufferCache *framebuffer_cache = RDG::framebuffer_cache_create();
+	framebuffer_cache->width = size.width;
+	framebuffer_cache->height = size.height;
+	framebuffer_cache->textures = textures;
+	framebuffer_cache->trackers = trackers;
+	framebuffer.framebuffer_cache = framebuffer_cache;
 
 	RID id = framebuffer_owner.make_rid(framebuffer);
 #ifdef DEV_ENABLED
@@ -2544,6 +2594,8 @@ RID RenderingDevice::framebuffer_create_multipass(const Vector<RID> &p_texture_a
 			_add_dependency(id, p_texture_attachments[i]);
 		}
 	}
+
+	framebuffer_cache->render_pass_creation_user_data = framebuffer_owner.get_or_null(id);
 
 	return id;
 }
@@ -3831,7 +3883,7 @@ RenderingDevice::DrawListID RenderingDevice::draw_list_begin_for_screen(DisplayS
 	clear_value.color = p_clear_color;
 
 	RDD::RenderPassID render_pass = driver->swap_chain_get_render_pass(sc_it->value);
-	draw_graph.add_draw_list_begin(render_pass, fb_it->value, viewport, clear_value, true, false, RDD::BreadcrumbMarker::BLIT_PASS);
+	draw_graph.add_draw_list_begin(render_pass, fb_it->value, viewport, true, clear_value, true, false, RDD::BreadcrumbMarker::BLIT_PASS);
 
 	draw_graph.add_draw_list_set_viewport(viewport);
 	draw_graph.add_draw_list_set_scissor(viewport);
@@ -3839,150 +3891,7 @@ RenderingDevice::DrawListID RenderingDevice::draw_list_begin_for_screen(DisplayS
 	return int64_t(ID_TYPE_DRAW_LIST) << ID_BASE_SHIFT;
 }
 
-Error RenderingDevice::_draw_list_setup_framebuffer(Framebuffer *p_framebuffer, InitialAction p_initial_color_action, FinalAction p_final_color_action, InitialAction p_initial_depth_action, FinalAction p_final_depth_action, RDD::FramebufferID *r_framebuffer, RDD::RenderPassID *r_render_pass, uint32_t *r_subpass_count) {
-	Framebuffer::VersionKey vk;
-	vk.initial_color_action = p_initial_color_action;
-	vk.final_color_action = p_final_color_action;
-	vk.initial_depth_action = p_initial_depth_action;
-	vk.final_depth_action = p_final_depth_action;
-	vk.view_count = p_framebuffer->view_count;
-
-	if (!p_framebuffer->framebuffers.has(vk)) {
-		// Need to create this version.
-		Framebuffer::Version version;
-
-		version.render_pass = _render_pass_create(framebuffer_formats[p_framebuffer->format_id].E->key().attachments, framebuffer_formats[p_framebuffer->format_id].E->key().passes, p_initial_color_action, p_final_color_action, p_initial_depth_action, p_final_depth_action, p_framebuffer->view_count);
-
-		LocalVector<RDD::TextureID> attachments;
-		for (int i = 0; i < p_framebuffer->texture_ids.size(); i++) {
-			Texture *texture = texture_owner.get_or_null(p_framebuffer->texture_ids[i]);
-			if (texture) {
-				attachments.push_back(texture->driver_id);
-				if (!(texture->usage_flags & TEXTURE_USAGE_VRS_ATTACHMENT_BIT)) { // VRS attachment will be a different size.
-					ERR_FAIL_COND_V(texture->width != p_framebuffer->size.width, ERR_BUG);
-					ERR_FAIL_COND_V(texture->height != p_framebuffer->size.height, ERR_BUG);
-				}
-			}
-		}
-
-		version.framebuffer = driver->framebuffer_create(version.render_pass, attachments, p_framebuffer->size.width, p_framebuffer->size.height);
-		ERR_FAIL_COND_V(!version.framebuffer, ERR_CANT_CREATE);
-
-		version.subpass_count = framebuffer_formats[p_framebuffer->format_id].E->key().passes.size();
-
-		p_framebuffer->framebuffers.insert(vk, version);
-	}
-	const Framebuffer::Version &version = p_framebuffer->framebuffers[vk];
-	*r_framebuffer = version.framebuffer;
-	*r_render_pass = version.render_pass;
-	*r_subpass_count = version.subpass_count;
-
-	return OK;
-}
-
-Error RenderingDevice::_draw_list_render_pass_begin(Framebuffer *p_framebuffer, InitialAction p_initial_color_action, FinalAction p_final_color_action, InitialAction p_initial_depth_action, FinalAction p_final_depth_action, const Vector<Color> &p_clear_colors, float p_clear_depth, uint32_t p_clear_stencil, Point2i p_viewport_offset, Point2i p_viewport_size, RDD::FramebufferID p_framebuffer_driver_id, RDD::RenderPassID p_render_pass, uint32_t p_breadcrumb) {
-	thread_local LocalVector<RDD::RenderPassClearValue> clear_values;
-	thread_local LocalVector<RDG::ResourceTracker *> resource_trackers;
-	thread_local LocalVector<RDG::ResourceUsage> resource_usages;
-	bool uses_color = false;
-	bool uses_depth = false;
-	clear_values.clear();
-	clear_values.resize(p_framebuffer->texture_ids.size());
-	resource_trackers.clear();
-	resource_usages.clear();
-	int clear_values_count = 0;
-	{
-		int color_index = 0;
-		for (int i = 0; i < p_framebuffer->texture_ids.size(); i++) {
-			RDD::RenderPassClearValue clear_value;
-
-			RID texture_rid = p_framebuffer->texture_ids[i];
-			Texture *texture = texture_owner.get_or_null(texture_rid);
-			if (!texture) {
-				color_index++;
-				continue;
-			}
-
-			// Indicate the texture will get modified for the shared texture fallback.
-			_texture_update_shared_fallback(texture_rid, texture, true);
-
-			if (texture->usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
-				if (color_index < p_clear_colors.size()) {
-					ERR_FAIL_INDEX_V(color_index, p_clear_colors.size(), ERR_BUG); // A bug.
-					clear_value.color = p_clear_colors[color_index];
-					color_index++;
-				}
-
-				resource_trackers.push_back(texture->draw_tracker);
-				resource_usages.push_back(RDG::RESOURCE_USAGE_ATTACHMENT_COLOR_READ_WRITE);
-				uses_color = true;
-			} else if (texture->usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-				clear_value.depth = p_clear_depth;
-				clear_value.stencil = p_clear_stencil;
-				resource_trackers.push_back(texture->draw_tracker);
-				resource_usages.push_back(RDG::RESOURCE_USAGE_ATTACHMENT_DEPTH_STENCIL_READ_WRITE);
-				uses_depth = true;
-			}
-
-			clear_values[clear_values_count++] = clear_value;
-		}
-	}
-
-	draw_graph.add_draw_list_begin(p_render_pass, p_framebuffer_driver_id, Rect2i(p_viewport_offset, p_viewport_size), clear_values, uses_color, uses_depth, p_breadcrumb);
-	draw_graph.add_draw_list_usages(resource_trackers, resource_usages);
-
-	// Mark textures as bound.
-	draw_list_bound_textures.clear();
-
-	for (int i = 0; i < p_framebuffer->texture_ids.size(); i++) {
-		Texture *texture = texture_owner.get_or_null(p_framebuffer->texture_ids[i]);
-		if (!texture) {
-			continue;
-		}
-		texture->bound = true;
-		draw_list_bound_textures.push_back(p_framebuffer->texture_ids[i]);
-	}
-
-	return OK;
-}
-
-void RenderingDevice::_draw_list_insert_clear_region(DrawList *p_draw_list, Framebuffer *p_framebuffer, Point2i p_viewport_offset, Point2i p_viewport_size, bool p_clear_color, const Vector<Color> &p_clear_colors, bool p_clear_depth, float p_depth, uint32_t p_stencil) {
-	LocalVector<RDD::AttachmentClear> clear_attachments;
-	int color_index = 0;
-	int texture_index = 0;
-	for (int i = 0; i < p_framebuffer->texture_ids.size(); i++) {
-		Texture *texture = texture_owner.get_or_null(p_framebuffer->texture_ids[i]);
-
-		if (!texture) {
-			texture_index++;
-			continue;
-		}
-
-		RDD::AttachmentClear clear_at;
-		if (p_clear_color && (texture->usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT)) {
-			Color clear_color = p_clear_colors[texture_index++];
-			clear_at.value.color = clear_color;
-			clear_at.color_attachment = color_index++;
-			clear_at.aspect = RDD::TEXTURE_ASPECT_COLOR_BIT;
-		} else if (p_clear_depth && (texture->usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
-			clear_at.value.depth = p_depth;
-			clear_at.value.stencil = p_stencil;
-			clear_at.color_attachment = 0;
-			clear_at.aspect = RDD::TEXTURE_ASPECT_DEPTH_BIT;
-			if (format_has_stencil(texture->format)) {
-				clear_at.aspect.set_flag(RDD::TEXTURE_ASPECT_STENCIL_BIT);
-			}
-		} else {
-			ERR_CONTINUE(true);
-		}
-		clear_attachments.push_back(clear_at);
-	}
-
-	Rect2i rect = Rect2i(p_viewport_offset, p_viewport_size);
-	draw_graph.add_draw_list_clear_attachments(clear_attachments, rect);
-}
-
-RenderingDevice::DrawListID RenderingDevice::draw_list_begin(RID p_framebuffer, InitialAction p_initial_color_action, FinalAction p_final_color_action, InitialAction p_initial_depth_action, FinalAction p_final_depth_action, const Vector<Color> &p_clear_color_values, float p_clear_depth, uint32_t p_clear_stencil, const Rect2 &p_region, uint32_t p_breadcrumb) {
+RenderingDevice::DrawListID RenderingDevice::draw_list_begin(RID p_framebuffer, BitField<ClearColorFlags> p_clear_colors, const Vector<Color> &p_clear_color_values, bool p_clear_depth, float p_clear_depth_value, bool p_clear_stencil, uint32_t p_clear_stencil_value, const Rect2 &p_region, uint32_t p_breadcrumb) {
 	ERR_RENDER_THREAD_GUARD_V(INVALID_ID);
 
 	ERR_FAIL_COND_V_MSG(draw_list != nullptr, INVALID_ID, "Only one draw list can be active at the same time.");
@@ -4006,42 +3915,82 @@ RenderingDevice::DrawListID RenderingDevice::draw_list_begin(RID p_framebuffer, 
 		viewport_size = regioni.size;
 	}
 
-	if (p_initial_color_action == INITIAL_ACTION_CLEAR) { // Check clear values.
-		int color_count = 0;
-		for (int i = 0; i < framebuffer->texture_ids.size(); i++) {
-			Texture *texture = texture_owner.get_or_null(framebuffer->texture_ids[i]);
-			// We only check for our VRS usage bit if this is not the first texture id.
-			// If it is the first we're likely populating our VRS texture.
-			// Bit dirty but...
-			if (!texture || (!(texture->usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) && !(i != 0 && texture->usage_flags & TEXTURE_USAGE_VRS_ATTACHMENT_BIT))) {
-				if (!texture || !texture->is_resolve_buffer) {
-					color_count++;
-				}
-			}
+	thread_local LocalVector<bool> clears;
+	thread_local LocalVector<RDD::RenderPassClearValue> clear_values;
+	thread_local LocalVector<RDG::ResourceTracker *> resource_trackers;
+	thread_local LocalVector<RDG::ResourceUsage> resource_usages;
+	bool uses_color = false;
+	bool uses_depth = false;
+	clears.resize(framebuffer->texture_ids.size());
+	clear_values.resize(framebuffer->texture_ids.size());
+	resource_trackers.clear();
+	resource_usages.clear();
+
+	uint32_t color_index = 0;
+	for (int i = 0; i < framebuffer->texture_ids.size(); i++) {
+		RID texture_rid = framebuffer->texture_ids[i];
+		Texture *texture = texture_owner.get_or_null(texture_rid);
+		if (texture == nullptr) {
+			clears[i] = false;
+			clear_values[i] = RDD::RenderPassClearValue();
+			continue;
 		}
-		ERR_FAIL_COND_V_MSG(p_clear_color_values.size() != color_count, INVALID_ID, "Clear color values supplied (" + itos(p_clear_color_values.size()) + ") differ from the amount required for framebuffer color attachments (" + itos(color_count) + ").");
+
+		// Indicate the texture will get modified for the shared texture fallback.
+		_texture_update_shared_fallback(texture_rid, texture, true);
+
+		bool clear = false;
+		RDD::RenderPassClearValue clear_value;
+		if (texture->usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
+			if (p_clear_colors.has_flag(ClearColorFlags(1 << color_index)) && color_index < p_clear_color_values.size()) {
+				clear = true;
+				clear_value.color = p_clear_color_values[color_index];
+			}
+
+			resource_trackers.push_back(texture->draw_tracker);
+			resource_usages.push_back(RDG::RESOURCE_USAGE_ATTACHMENT_COLOR_READ_WRITE);
+			uses_color = true;
+			color_index++;
+		} else if (texture->usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+			if (p_clear_depth || p_clear_stencil) {
+				clear = true;
+				clear_value.depth = p_clear_depth_value;
+				clear_value.stencil = p_clear_stencil_value;
+			}
+
+			resource_trackers.push_back(texture->draw_tracker);
+			resource_usages.push_back(RDG::RESOURCE_USAGE_ATTACHMENT_DEPTH_STENCIL_READ_WRITE);
+			uses_depth = true;
+		}
+
+		clears[i] = clear;
+		clear_values[i] = clear_value;
 	}
 
-	RDD::FramebufferID fb_driver_id;
-	RDD::RenderPassID render_pass;
+	draw_graph.add_draw_list_begin(framebuffer->framebuffer_cache, Rect2i(viewport_offset, viewport_size), clears, clear_values, uses_color, uses_depth, p_breadcrumb);
+	draw_graph.add_draw_list_usages(resource_trackers, resource_usages);
 
-	Error err = _draw_list_setup_framebuffer(framebuffer, p_initial_color_action, p_final_color_action, p_initial_depth_action, p_final_depth_action, &fb_driver_id, &render_pass, &draw_list_subpass_count);
-	ERR_FAIL_COND_V(err != OK, INVALID_ID);
+	// Mark textures as bound.
+	draw_list_bound_textures.clear();
 
-	err = _draw_list_render_pass_begin(framebuffer, p_initial_color_action, p_final_color_action, p_initial_depth_action, p_final_depth_action, p_clear_color_values, p_clear_depth, p_clear_stencil, viewport_offset, viewport_size, fb_driver_id, render_pass, p_breadcrumb);
+	for (int i = 0; i < framebuffer->texture_ids.size(); i++) {
+		Texture *texture = texture_owner.get_or_null(framebuffer->texture_ids[i]);
+		if (texture == nullptr) {
+			continue;
+		}
 
-	if (err != OK) {
-		return INVALID_ID;
+		texture->bound = true;
+		draw_list_bound_textures.push_back(framebuffer->texture_ids[i]);
 	}
-
-	draw_list_render_pass = render_pass;
-	draw_list_vkframebuffer = fb_driver_id;
 
 	_draw_list_allocate(Rect2i(viewport_offset, viewport_size), 0);
 #ifdef DEBUG_ENABLED
 	draw_list_framebuffer_format = framebuffer->format_id;
 #endif
 	draw_list_current_subpass = 0;
+
+	const FramebufferFormatKey &key = framebuffer_formats[framebuffer->format_id].E->key();
+	draw_list_subpass_count = key.passes.size();
 
 	Rect2i viewport_rect(viewport_offset, viewport_size);
 	draw_graph.add_draw_list_set_viewport(viewport_rect);
@@ -5439,6 +5388,7 @@ bool RenderingDevice::_texture_make_mutable(Texture *p_texture, RID p_texture_id
 			p_texture->draw_tracker->texture_driver_id = p_texture->driver_id;
 			p_texture->draw_tracker->texture_subresources = p_texture->barrier_range();
 			p_texture->draw_tracker->texture_usage = p_texture->usage_flags;
+			p_texture->draw_tracker->is_transient = p_texture->is_transient;
 			p_texture->draw_tracker->reference_count = 1;
 
 			if (p_texture_id.is_valid()) {
@@ -5849,13 +5799,7 @@ void RenderingDevice::_free_pending_resources(int p_frame) {
 	// Framebuffers.
 	while (frames[p_frame].framebuffers_to_dispose_of.front()) {
 		Framebuffer *framebuffer = &frames[p_frame].framebuffers_to_dispose_of.front()->get();
-
-		for (const KeyValue<Framebuffer::VersionKey, Framebuffer::Version> &E : framebuffer->framebuffers) {
-			// First framebuffer, then render pass because it depends on it.
-			driver->framebuffer_free(E.value.framebuffer);
-			driver->render_pass_free(E.value.render_pass);
-		}
-
+		draw_graph.framebuffer_cache_free(driver, framebuffer->framebuffer_cache);
 		frames[p_frame].framebuffers_to_dispose_of.pop_front();
 	}
 
@@ -6207,7 +6151,7 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 	driver->command_buffer_begin(frames[0].command_buffer);
 
 	// Create draw graph and start it initialized as well.
-	draw_graph.initialize(driver, device, frames.size(), main_queue_family, SECONDARY_COMMAND_BUFFERS_PER_FRAME);
+	draw_graph.initialize(driver, device, &_render_pass_create_from_graph, frames.size(), main_queue_family, SECONDARY_COMMAND_BUFFERS_PER_FRAME);
 	draw_graph.begin();
 
 	for (uint32_t i = 0; i < frames.size(); i++) {
@@ -6705,6 +6649,9 @@ void RenderingDevice::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("texture_is_shared", "texture"), &RenderingDevice::texture_is_shared);
 	ClassDB::bind_method(D_METHOD("texture_is_valid", "texture"), &RenderingDevice::texture_is_valid);
 
+	ClassDB::bind_method(D_METHOD("texture_set_transient", "texture", "transient"), &RenderingDevice::texture_set_transient);
+	ClassDB::bind_method(D_METHOD("texture_is_transient", "texture"), &RenderingDevice::texture_is_transient);
+
 	ClassDB::bind_method(D_METHOD("texture_copy", "from_texture", "to_texture", "from_pos", "to_pos", "size", "src_mipmap", "dst_mipmap", "src_layer", "dst_layer"), &RenderingDevice::texture_copy);
 	ClassDB::bind_method(D_METHOD("texture_clear", "texture", "color", "base_mipmap", "mipmap_count", "base_layer", "layer_count"), &RenderingDevice::texture_clear);
 	ClassDB::bind_method(D_METHOD("texture_resolve_multisample", "from_texture", "to_texture"), &RenderingDevice::texture_resolve_multisample);
@@ -6766,7 +6713,7 @@ void RenderingDevice::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("draw_list_begin_for_screen", "screen", "clear_color"), &RenderingDevice::draw_list_begin_for_screen, DEFVAL(DisplayServer::MAIN_WINDOW_ID), DEFVAL(Color()));
 
-	ClassDB::bind_method(D_METHOD("draw_list_begin", "framebuffer", "initial_color_action", "final_color_action", "initial_depth_action", "final_depth_action", "clear_color_values", "clear_depth", "clear_stencil", "region", "breadcrumb"), &RenderingDevice::draw_list_begin, DEFVAL(Vector<Color>()), DEFVAL(1.0), DEFVAL(0), DEFVAL(Rect2()), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("draw_list_begin", "framebuffer", "clear_colors", "clear_color_values", "clear_depth", "clear_depth_value", "clear_stencil", "clear_stencil_value", "region", "breadcrumb"), &RenderingDevice::draw_list_begin, DEFVAL(CLEAR_COLOR_NONE), DEFVAL(Vector<Color>()), DEFVAL(false), DEFVAL(1.0), DEFVAL(false), DEFVAL(0), DEFVAL(Rect2()), DEFVAL(0));
 #ifndef DISABLE_DEPRECATED
 	ClassDB::bind_method(D_METHOD("draw_list_begin_split", "framebuffer", "splits", "initial_color_action", "final_color_action", "initial_depth_action", "final_depth_action", "clear_color_values", "clear_depth", "clear_stencil", "region", "storage_textures"), &RenderingDevice::_draw_list_begin_split, DEFVAL(Vector<Color>()), DEFVAL(1.0), DEFVAL(0), DEFVAL(Rect2()), DEFVAL(TypedArray<RID>()));
 #endif
@@ -7290,22 +7237,20 @@ void RenderingDevice::_bind_methods() {
 	BIND_BITFIELD_FLAG(DYNAMIC_STATE_STENCIL_WRITE_MASK);
 	BIND_BITFIELD_FLAG(DYNAMIC_STATE_STENCIL_REFERENCE);
 
+#ifndef DISABLE_DEPRECATED
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_LOAD);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_CLEAR);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_DISCARD);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_MAX);
-#ifndef DISABLE_DEPRECATED
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_CLEAR_REGION);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_CLEAR_REGION_CONTINUE);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_KEEP);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_DROP);
 	BIND_ENUM_CONSTANT(INITIAL_ACTION_CONTINUE);
-#endif
 
 	BIND_ENUM_CONSTANT(FINAL_ACTION_STORE);
 	BIND_ENUM_CONSTANT(FINAL_ACTION_DISCARD);
 	BIND_ENUM_CONSTANT(FINAL_ACTION_MAX);
-#ifndef DISABLE_DEPRECATED
 	BIND_ENUM_CONSTANT(FINAL_ACTION_READ);
 	BIND_ENUM_CONSTANT(FINAL_ACTION_CONTINUE);
 #endif
@@ -7387,6 +7332,18 @@ void RenderingDevice::_bind_methods() {
 	BIND_ENUM_CONSTANT(BLIT_PASS);
 	BIND_ENUM_CONSTANT(UI_PASS);
 	BIND_ENUM_CONSTANT(DEBUG_PASS);
+
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_NONE);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_0);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_1);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_2);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_3);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_4);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_5);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_6);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_7);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_MASK);
+	BIND_BITFIELD_FLAG(CLEAR_COLOR_ALL);
 }
 
 void RenderingDevice::make_current() {

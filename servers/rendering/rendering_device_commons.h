@@ -373,6 +373,7 @@ public:
 		uint32_t usage_bits = 0;
 		Vector<DataFormat> shareable_formats;
 		bool is_resolve_buffer = false;
+		bool is_transient = false;
 
 		bool operator==(const TextureFormat &b) const {
 			if (format != b.format) {
