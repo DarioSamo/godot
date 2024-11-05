@@ -4,6 +4,8 @@
 
 #VERSION_DEFINES
 
+precision mediump float;
+
 /* Include our forward mobile UBOs definitions etc. */
 #include "scene_forward_mobile_inc.glsl"
 
@@ -13,43 +15,43 @@
 /* INPUT ATTRIBS */
 
 // Always contains vertex position in XYZ, can contain tangent angle in W.
-layout(location = 0) in vec4 vertex_angle_attrib;
+layout(location = 0) in highp vec4 vertex_angle_attrib;
 
 //only for pure render depth when normal is not used
 
 #ifdef NORMAL_USED
 // Contains Normal/Axis in RG, can contain tangent in BA.
-layout(location = 1) in vec4 axis_tangent_attrib;
+layout(location = 1) in highp vec4 axis_tangent_attrib;
 #endif
 
 // Location 2 is unused.
 
 #if defined(COLOR_USED)
-layout(location = 3) in vec4 color_attrib;
+layout(location = 3) in highp vec4 color_attrib;
 #endif
 
 #ifdef UV_USED
-layout(location = 4) in vec2 uv_attrib;
+layout(location = 4) in highp vec2 uv_attrib;
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP) || defined(MODE_RENDER_MATERIAL)
-layout(location = 5) in vec2 uv2_attrib;
+layout(location = 5) in highp vec2 uv2_attrib;
 #endif // MODE_RENDER_MATERIAL
 
 #if defined(CUSTOM0_USED)
-layout(location = 6) in vec4 custom0_attrib;
+layout(location = 6) in highp vec4 custom0_attrib;
 #endif
 
 #if defined(CUSTOM1_USED)
-layout(location = 7) in vec4 custom1_attrib;
+layout(location = 7) in highp vec4 custom1_attrib;
 #endif
 
 #if defined(CUSTOM2_USED)
-layout(location = 8) in vec4 custom2_attrib;
+layout(location = 8) in highp vec4 custom2_attrib;
 #endif
 
 #if defined(CUSTOM3_USED)
-layout(location = 9) in vec4 custom3_attrib;
+layout(location = 9) in highp vec4 custom3_attrib;
 #endif
 
 #if defined(BONES_USED) || defined(USE_PARTICLE_TRAILS)
@@ -57,21 +59,21 @@ layout(location = 10) in uvec4 bone_attrib;
 #endif
 
 #if defined(WEIGHTS_USED) || defined(USE_PARTICLE_TRAILS)
-layout(location = 11) in vec4 weight_attrib;
+layout(location = 11) in highp vec4 weight_attrib;
 #endif
 
-vec3 oct_to_vec3(vec2 e) {
-	vec3 v = vec3(e.xy, 1.0 - abs(e.x) - abs(e.y));
-	float t = max(-v.z, 0.0);
+highp vec3 oct_to_vec3(highp vec2 e) {
+	highp vec3 v = vec3(e.xy, 1.0 - abs(e.x) - abs(e.y));
+	highp float t = max(-v.z, 0.0);
 	v.xy += t * -sign(v.xy);
 	return normalize(v);
 }
 
-void axis_angle_to_tbn(vec3 axis, float angle, out vec3 tangent, out vec3 binormal, out vec3 normal) {
-	float c = cos(angle);
-	float s = sin(angle);
-	vec3 omc_axis = (1.0 - c) * axis;
-	vec3 s_axis = s * axis;
+void axis_angle_to_tbn(highp vec3 axis, highp float angle, out highp vec3 tangent, out highp vec3 binormal, out highp vec3 normal) {
+	highp float c = cos(angle);
+	highp float s = sin(angle);
+	highp vec3 omc_axis = (1.0 - c) * axis;
+	highp vec3 s_axis = s * axis;
 	tangent = omc_axis.xxx * axis + vec3(c, -s_axis.z, s_axis.y);
 	binormal = omc_axis.yyy * axis + vec3(s_axis.z, c, -s_axis.x);
 	normal = omc_axis.zzz * axis + vec3(-s_axis.y, s_axis.x, c);
@@ -79,31 +81,31 @@ void axis_angle_to_tbn(vec3 axis, float angle, out vec3 tangent, out vec3 binorm
 
 /* Varyings */
 
-layout(location = 0) highp out vec3 vertex_interp;
+layout(location = 0) out highp vec3 vertex_interp;
 
 #ifdef NORMAL_USED
-layout(location = 1) mediump out vec3 normal_interp;
+layout(location = 1) out mediump vec3 normal_interp;
 #endif
 
 #if defined(COLOR_USED)
-layout(location = 2) mediump out vec4 color_interp;
+layout(location = 2) out mediump vec4 color_interp;
 #endif
 
 #ifdef UV_USED
-layout(location = 3) mediump out vec2 uv_interp;
+layout(location = 3) out mediump vec2 uv_interp;
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
-layout(location = 4) mediump out vec2 uv2_interp;
+layout(location = 4) out mediump vec2 uv2_interp;
 #endif
 
 #if defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED)
-layout(location = 5) mediump out vec3 tangent_interp;
-layout(location = 6) mediump out vec3 binormal_interp;
+layout(location = 5) out mediump vec3 tangent_interp;
+layout(location = 6) out mediump vec3 binormal_interp;
 #endif
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
-layout(location = 7) highp out vec4 diffuse_light_interp;
-layout(location = 8) highp out vec4 specular_light_interp;
+layout(location = 7) out highp vec4 diffuse_light_interp;
+layout(location = 8) out highp vec4 specular_light_interp;
 
 #include "../scene_forward_vertex_lights_inc.glsl"
 #endif // !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
@@ -128,7 +130,7 @@ layout(location = 9) out highp float dp_clip;
 // !BAS! This needs to become an input once we implement our fallback!
 #define ViewIndex 0
 #endif
-vec3 multiview_uv(vec2 uv) {
+highp vec3 multiview_uv(highp vec2 uv) {
 	return vec3(uv, ViewIndex);
 }
 ivec3 multiview_uv(ivec2 uv) {
@@ -137,7 +139,7 @@ ivec3 multiview_uv(ivec2 uv) {
 #else
 // Set to zero, not supported in non stereo
 #define ViewIndex 0
-vec2 multiview_uv(vec2 uv) {
+highp vec2 multiview_uv(highp vec2 uv) {
 	return uv;
 }
 ivec2 multiview_uv(ivec2 uv) {
@@ -153,21 +155,21 @@ invariant gl_Position;
 
 #ifdef USE_DOUBLE_PRECISION
 // Helper functions for emulating double precision when adding floats.
-vec3 quick_two_sum(vec3 a, vec3 b, out vec3 out_p) {
-	vec3 s = a + b;
+highp vec3 quick_two_sum(highp vec3 a, highp vec3 b, out highp vec3 out_p) {
+	highp vec3 s = a + b;
 	out_p = b - (s - a);
 	return s;
 }
 
-vec3 two_sum(vec3 a, vec3 b, out vec3 out_p) {
-	vec3 s = a + b;
-	vec3 v = s - a;
+highp vec3 two_sum(highp vec3 a, highp vec3 b, out highp vec3 out_p) {
+	highp vec3 s = a + b;
+	highp vec3 v = s - a;
 	out_p = (a - (s - v)) + (b - v);
 	return s;
 }
 
-vec3 double_add_vec3(vec3 base_a, vec3 prec_a, vec3 base_b, vec3 prec_b, out vec3 out_precision) {
-	vec3 s, t, se, te;
+highp vec3 double_add_vec3(highp vec3 base_a, highp vec3 prec_a, highp vec3 base_b, highp vec3 prec_b, out highp vec3 out_precision) {
+	highp vec3 s, t, se, te;
 	s = two_sum(base_a, base_b, se);
 	t = two_sum(prec_a, prec_b, te);
 	se += t;
@@ -186,34 +188,34 @@ uint multimesh_stride() {
 }
 
 void main() {
-	vec4 instance_custom = vec4(0.0);
+	highp vec4 instance_custom = vec4(0.0);
 #if defined(COLOR_USED)
 	color_interp = color_attrib;
 #endif
 
-	mat4 model_matrix = instances.data[draw_call.instance_index].transform;
-	mat4 inv_view_matrix = scene_data.inv_view_matrix;
+	highp mat4 model_matrix = instances.data[draw_call.instance_index].transform;
+	highp mat4 inv_view_matrix = scene_data.inv_view_matrix;
 
 #ifdef USE_DOUBLE_PRECISION
-	vec3 model_precision = vec3(model_matrix[0][3], model_matrix[1][3], model_matrix[2][3]);
+	highp vec3 model_precision = vec3(model_matrix[0][3], model_matrix[1][3], model_matrix[2][3]);
 	model_matrix[0][3] = 0.0;
 	model_matrix[1][3] = 0.0;
 	model_matrix[2][3] = 0.0;
-	vec3 view_precision = vec3(inv_view_matrix[0][3], inv_view_matrix[1][3], inv_view_matrix[2][3]);
+	highp vec3 view_precision = vec3(inv_view_matrix[0][3], inv_view_matrix[1][3], inv_view_matrix[2][3]);
 	inv_view_matrix[0][3] = 0.0;
 	inv_view_matrix[1][3] = 0.0;
 	inv_view_matrix[2][3] = 0.0;
 #endif
 
-	mat3 model_normal_matrix;
+	highp mat3 model_normal_matrix;
 	if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_NON_UNIFORM_SCALE)) {
 		model_normal_matrix = transpose(inverse(mat3(model_matrix)));
 	} else {
 		model_normal_matrix = mat3(model_matrix);
 	}
 
-	mat4 matrix;
-	mat4 read_model_matrix = model_matrix;
+	highp mat4 matrix;
+	highp mat4 read_model_matrix = model_matrix;
 
 	if (sc_multimesh()) {
 		//multimesh, instances are for it
@@ -225,7 +227,7 @@ void main() {
 		uint offset = trail_size * stride * gl_InstanceIndex;
 
 #ifdef COLOR_USED
-		vec4 pcolor;
+		highp vec4 pcolor;
 #endif
 		{
 			uint boffset = offset + bone_attrib.x * stride;
@@ -300,28 +302,28 @@ void main() {
 		model_normal_matrix = model_normal_matrix * mat3(matrix);
 	}
 
-	vec3 vertex = vertex_angle_attrib.xyz * instances.data[draw_call.instance_index].compressed_aabb_size_pad.xyz + instances.data[draw_call.instance_index].compressed_aabb_position_pad.xyz;
+	highp vec3 vertex = vertex_angle_attrib.xyz * instances.data[draw_call.instance_index].compressed_aabb_size_pad.xyz + instances.data[draw_call.instance_index].compressed_aabb_position_pad.xyz;
 #ifdef NORMAL_USED
-	vec3 normal = oct_to_vec3(axis_tangent_attrib.xy * 2.0 - 1.0);
+	highp vec3 normal = oct_to_vec3(axis_tangent_attrib.xy * 2.0 - 1.0);
 #endif
 
 #if defined(NORMAL_USED) || defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED)
 
-	vec3 binormal;
-	float binormal_sign;
-	vec3 tangent;
+	highp vec3 binormal;
+	highp float binormal_sign;
+	highp vec3 tangent;
 	if (axis_tangent_attrib.z > 0.0 || axis_tangent_attrib.w < 1.0) {
 		// Uncompressed format.
-		vec2 signed_tangent_attrib = axis_tangent_attrib.zw * 2.0 - 1.0;
+		highp vec2 signed_tangent_attrib = axis_tangent_attrib.zw * 2.0 - 1.0;
 		tangent = oct_to_vec3(vec2(signed_tangent_attrib.x, abs(signed_tangent_attrib.y) * 2.0 - 1.0));
 		binormal_sign = sign(signed_tangent_attrib.y);
 		binormal = normalize(cross(normal, tangent) * binormal_sign);
 	} else {
 		// Compressed format.
-		float angle = vertex_angle_attrib.w;
+		highp float angle = vertex_angle_attrib.w;
 		binormal_sign = angle > 0.5 ? 1.0 : -1.0; // 0.5 does not exist in UNORM16, so values are either greater or smaller.
 		angle = abs(angle * 2.0 - 1.0) * M_PI; // 0.5 is basically zero, allowing to encode both signs reliably.
-		vec3 axis = normal;
+		highp vec3 axis = normal;
 		axis_angle_to_tbn(axis, angle, tangent, binormal, normal);
 		binormal *= binormal_sign;
 	}
@@ -335,7 +337,7 @@ void main() {
 	uv2_interp = uv2_attrib;
 #endif
 
-	vec4 uv_scale = instances.data[draw_call.instance_index].uv_scale;
+	highp vec4 uv_scale = instances.data[draw_call.instance_index].uv_scale;
 
 	if (uv_scale != vec4(0.0)) { // Compression enabled
 #ifdef UV_USED
@@ -347,17 +349,17 @@ void main() {
 	}
 
 #ifdef OVERRIDE_POSITION
-	vec4 position = vec4(1.0);
+	highp vec4 position = vec4(1.0);
 #endif
 
 #ifdef USE_MULTIVIEW
-	mat4 projection_matrix = scene_data.projection_matrix_view[ViewIndex];
-	mat4 inv_projection_matrix = scene_data.inv_projection_matrix_view[ViewIndex];
-	vec3 eye_offset = scene_data.eye_offset[ViewIndex].xyz;
+	highp mat4 projection_matrix = scene_data.projection_matrix_view[ViewIndex];
+	highp mat4 inv_projection_matrix = scene_data.inv_projection_matrix_view[ViewIndex];
+	highp vec3 eye_offset = scene_data.eye_offset[ViewIndex].xyz;
 #else
-	mat4 projection_matrix = scene_data.projection_matrix;
-	mat4 inv_projection_matrix = scene_data.inv_projection_matrix;
-	vec3 eye_offset = vec3(0.0, 0.0, 0.0);
+	highp mat4 projection_matrix = scene_data.projection_matrix;
+	highp mat4 inv_projection_matrix = scene_data.inv_projection_matrix;
+	highp vec3 eye_offset = vec3(0.0, 0.0, 0.0);
 #endif //USE_MULTIVIEW
 
 //using world coordinates
@@ -377,12 +379,12 @@ void main() {
 #endif
 #endif
 
-	float roughness = 1.0;
+	highp float roughness = 1.0;
 
-	mat4 modelview = scene_data.view_matrix * model_matrix;
-	mat3 modelview_normal = mat3(scene_data.view_matrix) * model_normal_matrix;
-	mat4 read_view_matrix = scene_data.view_matrix;
-	vec2 read_viewport_size = scene_data.viewport_size;
+	highp mat4 modelview = scene_data.view_matrix * model_matrix;
+	highp mat3 modelview_normal = mat3(scene_data.view_matrix) * model_normal_matrix;
+	highp mat4 read_view_matrix = scene_data.view_matrix;
+	highp vec2 read_viewport_size = scene_data.viewport_size;
 
 	{
 #CODE : VERTEX
@@ -395,13 +397,13 @@ void main() {
 	// We separate the basis from the origin because the basis is fine with single point precision.
 	// Then we combine the translations from the model matrix and the view matrix using emulated doubles.
 	// We add the result to the vertex and ignore the final lost precision.
-	vec3 model_origin = model_matrix[3].xyz;
+	highp vec3 model_origin = model_matrix[3].xyz;
 	if (sc_multimesh()) {
 		vertex = mat3(matrix) * vertex;
 		model_origin = double_add_vec3(model_origin, model_precision, matrix[3].xyz, vec3(0.0), model_precision);
 	}
 	vertex = mat3(inv_view_matrix * modelview) * vertex;
-	vec3 temp_precision;
+	highp vec3 temp_precision;
 	vertex += double_add_vec3(model_origin, model_precision, scene_data.inv_view_matrix[3].xyz, view_precision, temp_precision);
 	vertex = mat3(scene_data.view_matrix) * vertex;
 #else
@@ -445,9 +447,9 @@ void main() {
 // VERTEX LIGHTING
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
 #ifdef USE_MULTIVIEW
-	vec3 view = -normalize(vertex_interp - eye_offset);
+	highp vec3 view = -normalize(vertex_interp - eye_offset);
 #else
-	vec3 view = -normalize(vertex_interp);
+	highp vec3 view = -normalize(vertex_interp);
 #endif
 
 	diffuse_light_interp = vec4(0.0);
@@ -467,8 +469,8 @@ void main() {
 
 	if (sc_directional_lights() > 0) {
 		// We process the first directional light separately as it may have shadows.
-		vec3 directional_diffuse = vec3(0.0);
-		vec3 directional_specular = vec3(0.0);
+		highp vec3 directional_diffuse = vec3(0.0);
+		highp vec3 directional_specular = vec3(0.0);
 
 		for (uint i = 0; i < sc_directional_lights(); i++) {
 			if (!bool(directional_lights.data[i].mask & instances.data[draw_call.instance_index].layer_mask)) {
@@ -494,8 +496,8 @@ void main() {
 		}
 
 		// Calculate the contribution from the shadowed light so we can scale the shadows accordingly.
-		float diff_avg = dot(diffuse_light_interp.rgb, vec3(0.33333));
-		float diff_dir_avg = dot(directional_diffuse, vec3(0.33333));
+		highp float diff_avg = dot(diffuse_light_interp.rgb, vec3(0.33333));
+		highp float diff_dir_avg = dot(directional_diffuse, vec3(0.33333));
 		if (diff_avg > 0.0) {
 			diffuse_light_interp.a = diff_dir_avg / (diff_avg + diff_dir_avg);
 		} else {
@@ -504,8 +506,8 @@ void main() {
 
 		diffuse_light_interp.rgb += directional_diffuse;
 
-		float spec_avg = dot(specular_light_interp.rgb, vec3(0.33333));
-		float spec_dir_avg = dot(directional_specular, vec3(0.33333));
+		highp float spec_avg = dot(specular_light_interp.rgb, vec3(0.33333));
+		highp float spec_dir_avg = dot(directional_specular, vec3(0.33333));
 		if (spec_avg > 0.0) {
 			specular_light_interp.a = spec_dir_avg / (spec_avg + spec_dir_avg);
 		} else {
@@ -527,8 +529,8 @@ void main() {
 
 	//for dual paraboloid shadow mapping, this is the fastest but least correct way, as it curves straight edges
 
-	vec3 vtx = vertex_interp;
-	float distance = length(vtx);
+	highp vec3 vtx = vertex_interp;
+	highp float distance = length(vtx);
 	vtx = normalize(vtx);
 	vtx.xy /= 1.0 - vtx.z;
 	vtx.z = (distance / scene_data.z_far);
@@ -567,6 +569,8 @@ void main() {
 
 #VERSION_DEFINES
 
+precision mediump float;
+
 #define SHADER_IS_SRGB false
 #define SHADER_SPACE_FAR 0.0
 
@@ -575,37 +579,37 @@ void main() {
 
 /* Varyings */
 
-layout(location = 0) highp in vec3 vertex_interp;
+layout(location = 0) in highp vec3 vertex_interp;
 
 #ifdef NORMAL_USED
-layout(location = 1) mediump in vec3 normal_interp;
+layout(location = 1) in mediump vec3 normal_interp;
 #endif
 
 #if defined(COLOR_USED)
-layout(location = 2) mediump in vec4 color_interp;
+layout(location = 2) in mediump vec4 color_interp;
 #endif
 
 #ifdef UV_USED
-layout(location = 3) mediump in vec2 uv_interp;
+layout(location = 3) in mediump vec2 uv_interp;
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
-layout(location = 4) mediump in vec2 uv2_interp;
+layout(location = 4) in mediump vec2 uv2_interp;
 #endif
 
 #if defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED)
-layout(location = 5) mediump in vec3 tangent_interp;
-layout(location = 6) mediump in vec3 binormal_interp;
+layout(location = 5) in mediump vec3 tangent_interp;
+layout(location = 6) in mediump vec3 binormal_interp;
 #endif
 
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
-layout(location = 7) highp in vec4 diffuse_light_interp;
-layout(location = 8) highp in vec4 specular_light_interp;
+layout(location = 7) in highp vec4 diffuse_light_interp;
+layout(location = 8) in highp vec4 specular_light_interp;
 #endif
 
 #ifdef MODE_DUAL_PARABOLOID
 
-layout(location = 9) highp in float dp_clip;
+layout(location = 9) in highp float dp_clip;
 
 #endif
 

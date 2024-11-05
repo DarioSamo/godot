@@ -137,7 +137,7 @@ static String _interpstr(SL::DataInterpolation p_interp) {
 	return "";
 }
 
-static String _prestr(SL::DataPrecision p_pres, bool p_force_highp = false) {
+static String _prestr(SL::DataPrecision p_pres, bool p_force_highp = true /*, bool p_force_highp = false*/) {
 	switch (p_pres) {
 		case SL::PRECISION_LOWP:
 			return "lowp ";
