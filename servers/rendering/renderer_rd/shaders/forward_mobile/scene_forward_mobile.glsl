@@ -1689,7 +1689,7 @@ layout(location = 0) out vec4 frag_color;
 #define set_vertex_from_light_vertex()
 #endif
 
-// Unshaded (single render target).
+// Unshaded.
 
 #if defined(MODE_UNSHADED) && defined(FRAGMENT_COLOR_USED)
 #define write_frag_color_value_if_unshaded() \
@@ -1698,7 +1698,7 @@ layout(location = 0) out vec4 frag_color;
 #define write_frag_color_value_if_unshaded()
 #endif
 
-// Shaded (single render target).
+// Shaded.
 
 #if !defined(MODE_UNSHADED) && defined(FRAGMENT_COLOR_USED)
 #define write_frag_color_value_if_shaded() \
@@ -1707,11 +1707,11 @@ layout(location = 0) out vec4 frag_color;
 #define write_frag_color_value_if_shaded()
 #endif
 
-// Fog (single render target).
+// Fog.
 
 #if !defined(FOG_DISABLED) && defined(FRAGMENT_COLOR_USED)
 #define apply_fog_to_frag_color_value() \
-	frag_color.rgb = mix(frag_color.rgb, fog.rgb, fog.a);
+	frag_color_value.rgb = mix(frag_color_value.rgb, fog.rgb, fog.a);
 #else
 #define apply_fog_to_frag_color_value()
 #endif
