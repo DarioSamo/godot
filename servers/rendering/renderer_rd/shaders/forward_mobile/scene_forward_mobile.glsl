@@ -1203,18 +1203,6 @@ void lights_process(vec3 albedo, float alpha, vec3 view, vec3 vertex, vec3 norma
 #define compute_lights()
 #endif
 
-// Lighting (omni and spot)
-
-#if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && !defined(USE_VERTEX_LIGHTING)
-void omni_and_spot_lights_process() {
-}
-
-#define compute_omni_and_spot_lights() \
-	omni_and_spot_lights_process();
-#else
-#define compute_omni_and_spot_lights()
-#endif
-
 // Lighting (not material).
 
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_RENDER_MATERIAL) && !defined(MODE_UNSHADED)
