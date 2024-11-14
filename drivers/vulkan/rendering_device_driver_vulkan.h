@@ -438,6 +438,7 @@ private:
 		VkShaderStageFlags vk_push_constant_stages = 0;
 		TightLocalVector<VkPipelineShaderStageCreateInfo> vk_stages_create_info;
 		TightLocalVector<VkDescriptorSetLayout> vk_descriptor_set_layouts;
+		Vector<Vector<uint8_t>> stages_spirv;
 		VkPipelineLayout vk_pipeline_layout = VK_NULL_HANDLE;
 	};
 

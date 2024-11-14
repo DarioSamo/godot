@@ -49,6 +49,11 @@
 
 #define PRINT_NATIVE_COMMANDS 0
 
+#include <filesystem>
+#include <fstream>
+
+static const std::filesystem::path re_spirv_path = "C:/Trabajo/Personal/re-spirv-test-data";
+
 /*****************/
 /**** GENERIC ****/
 /*****************/
@@ -3603,8 +3608,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 		read_offset += sizeof(ShaderBinary::SpecializationConstant);
 	}
 
-	Vector<Vector<uint8_t>> stages_spirv;
-	stages_spirv.resize(binary_data.stage_count);
+	shader_info.stages_spirv.resize(binary_data.stage_count);
 	r_shader_desc.stages.resize(binary_data.stage_count);
 
 	for (uint32_t i = 0; i < binary_data.stage_count; i++) {
@@ -3632,7 +3636,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 			src_smolv = binptr + read_offset;
 		}
 
-		Vector<uint8_t> &spirv = stages_spirv.ptrw()[i];
+		Vector<uint8_t> &spirv = shader_info.stages_spirv.ptrw()[i];
 		uint32_t spirv_size = smolv::GetDecodedBufferSize(src_smolv, smolv_size);
 		spirv.resize(spirv_size);
 		if (!smolv::Decode(src_smolv, smolv_size, spirv.ptrw(), spirv_size)) {
@@ -3655,8 +3659,8 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 	for (int i = 0; i < r_shader_desc.stages.size(); i++) {
 		VkShaderModuleCreateInfo shader_module_create_info = {};
 		shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shader_module_create_info.codeSize = stages_spirv[i].size();
-		shader_module_create_info.pCode = (const uint32_t *)stages_spirv[i].ptr();
+		shader_module_create_info.codeSize = shader_info.stages_spirv[i].size();
+		shader_module_create_info.pCode = (const uint32_t *)shader_info.stages_spirv[i].ptr();
 
 		VkShaderModule vk_module = VK_NULL_HANDLE;
 		VkResult res = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &vk_module);
@@ -4995,6 +4999,26 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	VkPipeline vk_pipeline = VK_NULL_HANDLE;
 	VkResult err = vkCreateGraphicsPipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE), &vk_pipeline);
 	ERR_FAIL_COND_V_MSG(err, PipelineID(), "vkCreateGraphicsPipelines failed with error " + itos(err) + ".");
+
+	///
+	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
+		String name = String::num_uint64(uint64_t(vk_pipeline)) + "-" + String::num_uint64(i);
+		CharString name_char_str = name.ascii();
+		std::filesystem::path spirv_path = re_spirv_path / (std::string(name_char_str.ptr()) + std::string(".spirv"));
+		std::ofstream spirv_stream(spirv_path, std::ios::binary);
+		spirv_stream.write((const char *)(shader_info->stages_spirv[i].ptr()), shader_info->stages_spirv[i].size());
+		spirv_stream.close();
+
+		std::filesystem::path spec_path = re_spirv_path / (std::string(name_char_str.ptr()) + std::string(".spec"));
+		std::ofstream spec_stream(spec_path, std::ios::binary);
+		for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
+			spec_stream.write((const char *)(&p_specialization_constants[j].constant_id), sizeof(uint32_t));
+			spec_stream.write((const char *)(&p_specialization_constants[j].int_value), sizeof(uint32_t));
+		}
+
+		spec_stream.close();
+	}
+	///
 
 	return PipelineID(vk_pipeline);
 }
