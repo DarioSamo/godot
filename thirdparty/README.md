@@ -824,6 +824,20 @@ Files extracted from upstream source:
 - `License.txt`
 
 
+## re-spirv
+
+- Upstream: https://github.com/renderbag/re-spirv
+- Version: git (75e74c3f97985b4afe60b720271690fb97b9cbfa, 2024)
+- License: MIT
+
+Files extracted from upstream source:
+
+- `re-spirv.cpp`
+- `re-spirv.h`
+- `LICENSE`
+- `include` folder was created from the contents of the SPIR-V header generated in the `external` folder
+
+
 ## rvo2
 
 For 2D in `rvo2_2d` folder

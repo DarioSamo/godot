@@ -49,6 +49,9 @@
 
 #define PRINT_NATIVE_COMMANDS 0
 
+// Disable dead code elimination when using re-spirv.
+#define RESPV_DONT_REMOVE_DEAD_CODE 0
+
 /*****************/
 /**** GENERIC ****/
 /*****************/
@@ -3603,8 +3606,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 		read_offset += sizeof(ShaderBinary::SpecializationConstant);
 	}
 
-	Vector<Vector<uint8_t>> stages_spirv;
-	stages_spirv.resize(binary_data.stage_count);
+	shader_info.spirv_stage_bytes.resize(binary_data.stage_count);
 	r_shader_desc.stages.resize(binary_data.stage_count);
 
 	for (uint32_t i = 0; i < binary_data.stage_count; i++) {
@@ -3632,7 +3634,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 			src_smolv = binptr + read_offset;
 		}
 
-		Vector<uint8_t> &spirv = stages_spirv.ptrw()[i];
+		Vector<uint8_t> &spirv = shader_info.spirv_stage_bytes[i];
 		uint32_t spirv_size = smolv::GetDecodedBufferSize(src_smolv, smolv_size);
 		spirv.resize(spirv_size);
 		if (!smolv::Decode(src_smolv, smolv_size, spirv.ptrw(), spirv_size)) {
@@ -3651,12 +3653,14 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 	// Modules.
 
 	String error_text;
+	shader_info.vk_stages_create_info.reserve(r_shader_desc.stages.size());
+	shader_info.respv_stage_shaders.reserve(r_shader_desc.stages.size());
 
 	for (int i = 0; i < r_shader_desc.stages.size(); i++) {
 		VkShaderModuleCreateInfo shader_module_create_info = {};
 		shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shader_module_create_info.codeSize = stages_spirv[i].size();
-		shader_module_create_info.pCode = (const uint32_t *)stages_spirv[i].ptr();
+		shader_module_create_info.codeSize = shader_info.spirv_stage_bytes[i].size();
+		shader_module_create_info.pCode = (const uint32_t *)shader_info.spirv_stage_bytes[i].ptr();
 
 		VkShaderModule vk_module = VK_NULL_HANDLE;
 		VkResult res = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &vk_module);
@@ -3672,6 +3676,9 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 		create_info.pName = "main";
 
 		shader_info.vk_stages_create_info.push_back(create_info);
+
+		respv::Shader respv_shader(shader_module_create_info.pCode, shader_module_create_info.codeSize);
+		shader_info.respv_stage_shaders.push_back(respv_shader);
 	}
 
 	// Descriptor sets.
@@ -4953,26 +4960,65 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 			"Cannot create pipeline without shader module, please make sure shader modules are destroyed only after all associated pipelines are created.");
 	VkPipelineShaderStageCreateInfo *vk_pipeline_stages = ALLOCA_ARRAY(VkPipelineShaderStageCreateInfo, shader_info->vk_stages_create_info.size());
 
+	thread_local std::vector<uint8_t> respv_optimized_data;
+	thread_local LocalVector<respv::SpecConstant> respv_spec_constants;
+	thread_local LocalVector<VkShaderModule> respv_shader_modules;
+	respv_shader_modules.clear();
+
 	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
 		vk_pipeline_stages[i] = shader_info->vk_stages_create_info[i];
 
 		if (p_specialization_constants.size()) {
-			VkSpecializationMapEntry *specialization_map_entries = ALLOCA_ARRAY(VkSpecializationMapEntry, p_specialization_constants.size());
-			for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
-				specialization_map_entries[j] = {};
-				specialization_map_entries[j].constantID = p_specialization_constants[j].constant_id;
-				specialization_map_entries[j].offset = (const char *)&p_specialization_constants[j].int_value - (const char *)p_specialization_constants.ptr();
-				specialization_map_entries[j].size = sizeof(uint32_t);
+			bool use_pipeline_spec_constants = true;
+			if (!shader_info->respv_stage_shaders[i].empty()) {
+				// Attempt to optimize the shader using re-spirv before relying on the driver.
+				respv_spec_constants.resize(p_specialization_constants.size());
+				for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
+					respv_spec_constants[j].specId = p_specialization_constants[j].constant_id;
+					respv_spec_constants[j].values.resize(1);
+					respv_spec_constants[j].values[0] = p_specialization_constants[j].int_value;
+				}
+
+				respv::Options respv_options;
+#if RESPV_DONT_REMOVE_DEAD_CODE
+				options.removeDeadCode = false;
+#endif
+				if (respv::Optimizer::run(shader_info->respv_stage_shaders[i], respv_spec_constants.ptr(), respv_spec_constants.size(), respv_optimized_data, respv_options)) {
+					// Create the shader module with the optimized output.
+					VkShaderModule shader_module = VK_NULL_HANDLE;
+					VkShaderModuleCreateInfo shader_module_create_info = {};
+					shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+					shader_module_create_info.pCode = (const uint32_t *)(respv_optimized_data.data());
+					shader_module_create_info.codeSize = respv_optimized_data.size();
+					VkResult err = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &shader_module);
+					if (err == VK_SUCCESS) {
+						// Replace the module used in the creation info.
+						vk_pipeline_stages[i].module = shader_module;
+						respv_shader_modules.push_back(shader_module);
+						use_pipeline_spec_constants = false;
+					}
+				}
 			}
 
-			VkSpecializationInfo *specialization_info = ALLOCA_SINGLE(VkSpecializationInfo);
-			*specialization_info = {};
-			specialization_info->dataSize = p_specialization_constants.size() * sizeof(PipelineSpecializationConstant);
-			specialization_info->pData = p_specialization_constants.ptr();
-			specialization_info->mapEntryCount = p_specialization_constants.size();
-			specialization_info->pMapEntries = specialization_map_entries;
+			if (use_pipeline_spec_constants) {
+				// Use specialization constants through the driver.
+				VkSpecializationMapEntry *specialization_map_entries = ALLOCA_ARRAY(VkSpecializationMapEntry, p_specialization_constants.size());
+				for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
+					specialization_map_entries[j] = {};
+					specialization_map_entries[j].constantID = p_specialization_constants[j].constant_id;
+					specialization_map_entries[j].offset = (const char *)&p_specialization_constants[j].int_value - (const char *)p_specialization_constants.ptr();
+					specialization_map_entries[j].size = sizeof(uint32_t);
+				}
 
-			vk_pipeline_stages[i].pSpecializationInfo = specialization_info;
+				VkSpecializationInfo *specialization_info = ALLOCA_SINGLE(VkSpecializationInfo);
+				*specialization_info = {};
+				specialization_info->dataSize = p_specialization_constants.size() * sizeof(PipelineSpecializationConstant);
+				specialization_info->pData = p_specialization_constants.ptr();
+				specialization_info->mapEntryCount = p_specialization_constants.size();
+				specialization_info->pMapEntries = specialization_map_entries;
+
+				vk_pipeline_stages[i].pSpecializationInfo = specialization_info;
+			}
 		}
 	}
 
@@ -4995,6 +5041,11 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	VkPipeline vk_pipeline = VK_NULL_HANDLE;
 	VkResult err = vkCreateGraphicsPipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE), &vk_pipeline);
 	ERR_FAIL_COND_V_MSG(err, PipelineID(), "vkCreateGraphicsPipelines failed with error " + itos(err) + ".");
+
+	// Destroy any modules created temporarily by re-spirv.
+	for (VkShaderModule vk_module : respv_shader_modules) {
+		vkDestroyShaderModule(vk_device, vk_module, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE));
+	}
 
 	return PipelineID(vk_pipeline);
 }
