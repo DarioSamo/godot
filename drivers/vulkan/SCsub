@@ -7,9 +7,10 @@ thirdparty_obj = []
 thirdparty_dir = "#thirdparty/vulkan"
 thirdparty_volk_dir = "#thirdparty/volk"
 thirdparty_respirv_dir = "#thirdparty/re-spirv"
+thirdparty_spirv_tools_dir = "#thirdparty/spirv-tools"
 
 # Use bundled Vulkan headers
-env.Prepend(CPPPATH=[thirdparty_dir, thirdparty_dir + "/include"])
+env.Prepend(CPPPATH=[thirdparty_dir, thirdparty_dir + "/include", thirdparty_spirv_tools_dir + "/include"])
 
 if env["use_volk"]:
     env.AppendUnique(CPPDEFINES=["USE_VOLK"])

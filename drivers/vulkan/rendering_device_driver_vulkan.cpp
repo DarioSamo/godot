@@ -45,6 +45,8 @@
 #include "thirdparty/swappy-frame-pacing/swappyVk.h"
 #endif
 
+#include "thirdparty/spirv-tools/include/spirv-tools/optimizer.hpp"
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
 #define PRINT_NATIVE_COMMANDS 0
@@ -4961,6 +4963,7 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	VkPipelineShaderStageCreateInfo *vk_pipeline_stages = ALLOCA_ARRAY(VkPipelineShaderStageCreateInfo, shader_info->vk_stages_create_info.size());
 
 	thread_local std::vector<uint8_t> respv_optimized_data;
+	thread_local std::vector<uint32_t> spvopt_optimized_data;
 	thread_local LocalVector<respv::SpecConstant> respv_spec_constants;
 	thread_local LocalVector<VkShaderModule> respv_shader_modules;
 	thread_local LocalVector<VkSpecializationMapEntry> specialization_entries;
@@ -4986,18 +4989,53 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 				respv_options.removeDeadCode = false;
 #endif
 				if (respv::Optimizer::run(shader_info->respv_stage_shaders[i], respv_spec_constants.ptr(), respv_spec_constants.size(), respv_optimized_data, respv_options)) {
-					// Create the shader module with the optimized output.
-					VkShaderModule shader_module = VK_NULL_HANDLE;
-					VkShaderModuleCreateInfo shader_module_create_info = {};
-					shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-					shader_module_create_info.pCode = (const uint32_t *)(respv_optimized_data.data());
-					shader_module_create_info.codeSize = respv_optimized_data.size();
-					VkResult err = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &shader_module);
-					if (err == VK_SUCCESS) {
-						// Replace the module used in the creation info.
-						vk_pipeline_stages[i].module = shader_module;
-						respv_shader_modules.push_back(shader_module);
-						use_pipeline_spec_constants = false;
+					spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_2);
+					optimizer.RegisterPass(spvtools::CreateStripDebugInfoPass());
+					optimizer.RegisterPass(spvtools::CreateWrapOpKillPass());
+					optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+					optimizer.RegisterPass(spvtools::CreateMergeReturnPass());
+					optimizer.RegisterPass(spvtools::CreateInlineExhaustivePass());
+					optimizer.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
+					optimizer.RegisterPass(spvtools::CreateScalarReplacementPass());
+					optimizer.RegisterPass(spvtools::CreateLocalAccessChainConvertPass());
+					optimizer.RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass());
+					optimizer.RegisterPass(spvtools::CreateLocalSingleStoreElimPass());
+					optimizer.RegisterPass(spvtools::CreateSimplificationPass());
+					optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+					optimizer.RegisterPass(spvtools::CreateVectorDCEPass());
+					optimizer.RegisterPass(spvtools::CreateDeadInsertElimPass());
+					optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+					optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+					optimizer.RegisterPass(spvtools::CreateBlockMergePass());
+					optimizer.RegisterPass(spvtools::CreateLocalMultiStoreElimPass());
+					optimizer.RegisterPass(spvtools::CreateIfConversionPass());
+					optimizer.RegisterPass(spvtools::CreateSimplificationPass());
+					optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+					optimizer.RegisterPass(spvtools::CreateVectorDCEPass());
+					optimizer.RegisterPass(spvtools::CreateDeadInsertElimPass());
+					optimizer.RegisterPass(spvtools::CreateInterpolateFixupPass());
+					optimizer.RegisterPass(spvtools::CreateRedundancyEliminationPass());
+					optimizer.RegisterPass(spvtools::CreateEliminateDeadInputComponentsSafePass());
+					optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+					optimizer.RegisterPass(spvtools::CreateCFGCleanupPass());
+
+					spvtools::OptimizerOptions spvOptOptions;
+					optimizer.SetTargetEnv(SPV_ENV_VULKAN_1_2);
+					spvOptOptions.set_run_validator(false);
+					if (optimizer.Run((const uint32_t *)(respv_optimized_data.data()), respv_optimized_data.size() / sizeof(uint32_t), &spvopt_optimized_data, spvOptOptions)) {
+						// Create the shader module with the optimized output.
+						VkShaderModule shader_module = VK_NULL_HANDLE;
+						VkShaderModuleCreateInfo shader_module_create_info = {};
+						shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+						shader_module_create_info.pCode = (const uint32_t *)(spvopt_optimized_data.data());
+						shader_module_create_info.codeSize = spvopt_optimized_data.size() * sizeof(uint32_t);
+						VkResult err = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &shader_module);
+						if (err == VK_SUCCESS) {
+							// Replace the module used in the creation info.
+							vk_pipeline_stages[i].module = shader_module;
+							respv_shader_modules.push_back(shader_module);
+							use_pipeline_spec_constants = false;
+						}
 					}
 				}
 			}

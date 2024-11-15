@@ -281,6 +281,7 @@ opts.Add(BoolVariable("builtin_enet", "Use the built-in ENet library", True))
 opts.Add(BoolVariable("builtin_freetype", "Use the built-in FreeType library", True))
 opts.Add(BoolVariable("builtin_msdfgen", "Use the built-in MSDFgen library", True))
 opts.Add(BoolVariable("builtin_glslang", "Use the built-in glslang library", True))
+opts.Add(BoolVariable("builtin_spirv_tools", "Use the built-in SPIR-V Tools library", True))
 opts.Add(BoolVariable("builtin_graphite", "Use the built-in Graphite library", True))
 opts.Add(BoolVariable("builtin_harfbuzz", "Use the built-in HarfBuzz library", True))
 opts.Add(BoolVariable("builtin_icu4c", "Use the built-in ICU library", True))
@@ -354,7 +355,9 @@ if env["platform"] == "":
 if env["platform"] in compatibility_platform_aliases:
     alias = env["platform"]
     platform = compatibility_platform_aliases[alias]
-    print_warning(f'Platform "{alias}" has been renamed to "{platform}" in Godot 4. Building for platform "{platform}".')
+    print_warning(
+        f'Platform "{alias}" has been renamed to "{platform}" in Godot 4. Building for platform "{platform}".'
+    )
     env["platform"] = platform
 
 # Alias for convenience.
