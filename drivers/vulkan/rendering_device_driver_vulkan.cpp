@@ -50,7 +50,7 @@
 #define PRINT_NATIVE_COMMANDS 0
 
 // Disable dead code elimination when using re-spirv.
-#define RESPV_DONT_REMOVE_DEAD_CODE 1
+#define RESPV_DONT_REMOVE_DEAD_CODE 0
 
 /*****************/
 /**** GENERIC ****/
@@ -4963,7 +4963,9 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	thread_local std::vector<uint8_t> respv_optimized_data;
 	thread_local LocalVector<respv::SpecConstant> respv_spec_constants;
 	thread_local LocalVector<VkShaderModule> respv_shader_modules;
+	thread_local LocalVector<VkSpecializationMapEntry> specialization_entries;
 	respv_shader_modules.clear();
+	specialization_entries.clear();
 
 	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
 		vk_pipeline_stages[i] = shader_info->vk_stages_create_info[i];
@@ -5002,20 +5004,22 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 
 			if (use_pipeline_spec_constants) {
 				// Use specialization constants through the driver.
-				VkSpecializationMapEntry *specialization_map_entries = ALLOCA_ARRAY(VkSpecializationMapEntry, p_specialization_constants.size());
-				for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
-					specialization_map_entries[j] = {};
-					specialization_map_entries[j].constantID = p_specialization_constants[j].constant_id;
-					specialization_map_entries[j].offset = (const char *)&p_specialization_constants[j].int_value - (const char *)p_specialization_constants.ptr();
-					specialization_map_entries[j].size = sizeof(uint32_t);
+				if (specialization_entries.is_empty()) {
+					specialization_entries.resize(p_specialization_constants.size());
+					for (uint32_t j = 0; j < p_specialization_constants.size(); j++) {
+						specialization_entries[j] = {};
+						specialization_entries[j].constantID = p_specialization_constants[j].constant_id;
+						specialization_entries[j].offset = (const char *)&p_specialization_constants[j].int_value - (const char *)p_specialization_constants.ptr();
+						specialization_entries[j].size = sizeof(uint32_t);
+					}
 				}
 
 				VkSpecializationInfo *specialization_info = ALLOCA_SINGLE(VkSpecializationInfo);
 				*specialization_info = {};
 				specialization_info->dataSize = p_specialization_constants.size() * sizeof(PipelineSpecializationConstant);
 				specialization_info->pData = p_specialization_constants.ptr();
-				specialization_info->mapEntryCount = p_specialization_constants.size();
-				specialization_info->pMapEntries = specialization_map_entries;
+				specialization_info->mapEntryCount = specialization_entries.size();
+				specialization_info->pMapEntries = specialization_entries.ptr();
 
 				vk_pipeline_stages[i].pSpecializationInfo = specialization_info;
 			}

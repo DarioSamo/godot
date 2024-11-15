@@ -24,6 +24,7 @@ namespace respv {
         switch (pOpCode) {
         case SpvOpUndef:
         case SpvOpSource:
+        case SpvOpSourceExtension:
         case SpvOpName:
         case SpvOpMemberName:
         case SpvOpExtension:
@@ -120,6 +121,8 @@ namespace respv {
         case SpvOpSMulExtended:
         case SpvOpAny:
         case SpvOpAll:
+        case SpvOpIsNan:
+        case SpvOpIsInf:
         case SpvOpLogicalEqual:
         case SpvOpLogicalNotEqual:
         case SpvOpLogicalOr:
@@ -163,6 +166,9 @@ namespace respv {
         case SpvOpDPdx:
         case SpvOpDPdy:
         case SpvOpFwidth:
+        case SpvOpControlBarrier:
+        case SpvOpMemoryBarrier:
+        case SpvOpAtomicIAdd:
         case SpvOpPhi:
         case SpvOpLoopMerge:
         case SpvOpSelectionMerge:
@@ -184,6 +190,7 @@ namespace respv {
     static bool SpvIsIgnored(SpvOp pOpCode) {
         switch (pOpCode) {
         case SpvOpSource:
+        case SpvOpSourceExtension:
         case SpvOpName:
         case SpvOpMemberName:
             return true;
