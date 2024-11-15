@@ -50,7 +50,7 @@
 #define PRINT_NATIVE_COMMANDS 0
 
 // Disable dead code elimination when using re-spirv.
-#define RESPV_DONT_REMOVE_DEAD_CODE 0
+#define RESPV_DONT_REMOVE_DEAD_CODE 1
 
 /*****************/
 /**** GENERIC ****/
@@ -4981,7 +4981,7 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 
 				respv::Options respv_options;
 #if RESPV_DONT_REMOVE_DEAD_CODE
-				options.removeDeadCode = false;
+				respv_options.removeDeadCode = false;
 #endif
 				if (respv::Optimizer::run(shader_info->respv_stage_shaders[i], respv_spec_constants.ptr(), respv_spec_constants.size(), respv_optimized_data, respv_options)) {
 					// Create the shader module with the optimized output.
