@@ -99,6 +99,11 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		PFN_vkQueuePresentKHR QueuePresentKHR = nullptr;
 		PFN_vkCreateRenderPass2KHR CreateRenderPass2KHR = nullptr;
 		PFN_vkCmdEndRenderPass2KHR EndRenderPass2KHR = nullptr;
+#ifdef _WIN32
+		PFN_vkGetMemoryWin32HandleKHR GetMemoryWin32HandleKHR = nullptr;
+#else
+		PFN_vkGetMemoryFdKHR GetMemoryFdKHR = nullptr;
+#endif
 
 		// Debug marker extensions.
 		PFN_vkCmdDebugMarkerBeginEXT CmdDebugMarkerBeginEXT = nullptr;
@@ -118,6 +123,7 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	uint32_t frame_count = 1;
 	VkPhysicalDevice physical_device = VK_NULL_HANDLE;
 	VkPhysicalDeviceProperties physical_device_properties = {};
+	VkPhysicalDeviceMemoryProperties physical_device_memory_properties = {};
 	VkPhysicalDeviceFeatures physical_device_features = {};
 	VkPhysicalDeviceFeatures requested_device_features = {};
 	HashMap<CharString, bool> requested_device_extensions;
@@ -166,6 +172,7 @@ private:
 	/****************/
 
 	VmaAllocator allocator = nullptr;
+	VmaAllocator external_allocator = nullptr;
 	HashMap<uint32_t, VmaPool> small_allocs_pools;
 
 	VmaPool _find_or_create_small_allocs_pool(uint32_t p_mem_type_index);
@@ -216,6 +223,7 @@ public:
 #ifdef DEBUG_ENABLED
 		bool created_from_extension = false;
 #endif
+		bool fdm_hack = false;
 	};
 
 	VkSampleCountFlagBits _ensure_supported_sample_count(TextureSamples p_requested_sample_count);

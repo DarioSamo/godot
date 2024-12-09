@@ -519,7 +519,14 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 
 	// We don't actually use this extension, but some runtime components on some platforms
 	// can and will fill the validation layers with useless info otherwise if not enabled.
+#ifdef _WIN32
+	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME, false);
+#else
 	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, false);
+#endif
+
+	_register_requested_device_extension(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME, false);
 
 	if (Engine::get_singleton()->is_generate_spirv_debug_info_enabled()) {
 		_register_requested_device_extension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME, true);
@@ -1187,6 +1194,11 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		device_functions.GetSwapchainImagesKHR = PFN_vkGetSwapchainImagesKHR(functions.GetDeviceProcAddr(vk_device, "vkGetSwapchainImagesKHR"));
 		device_functions.AcquireNextImageKHR = PFN_vkAcquireNextImageKHR(functions.GetDeviceProcAddr(vk_device, "vkAcquireNextImageKHR"));
 		device_functions.QueuePresentKHR = PFN_vkQueuePresentKHR(functions.GetDeviceProcAddr(vk_device, "vkQueuePresentKHR"));
+#ifdef _WIN32
+		device_functions.GetMemoryWin32HandleKHR = PFN_vkGetMemoryWin32HandleKHR(functions.GetDeviceProcAddr(vk_device, "vkGetMemoryWin32HandleKHR"));
+#else
+		device_functions.GetMemoryFdKHR = PFN_vkGetMemoryFdKHR(functions.GetDeviceProcAddr(vk_device, "vkGetMemoryFdKHR"));
+#endif
 
 		if (enabled_device_extension_names.has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) {
 			device_functions.CreateRenderPass2KHR = PFN_vkCreateRenderPass2KHR(functions.GetDeviceProcAddr(vk_device, "vkCreateRenderPass2KHR"));
@@ -1221,6 +1233,28 @@ Error RenderingDeviceDriverVulkan::_initialize_allocator() {
 	}
 	VkResult err = vmaCreateAllocator(&allocator_info, &allocator);
 	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "vmaCreateAllocator failed with error " + itos(err) + ".");
+
+	LocalVector<VkExternalMemoryHandleTypeFlagsKHR> export_memory_allocate_info_vector;
+	export_memory_allocate_info_vector.resize(physical_device_memory_properties.memoryTypeCount);
+	for (uint32_t i = 0; i < physical_device_memory_properties.memoryTypeCount; i++) {
+#ifdef _WIN32
+		export_memory_allocate_info_vector[i] = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+		export_memory_allocate_info_vector[i] = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+	}
+
+	if (enabled_device_extension_names.has(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) && enabled_device_extension_names.has(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME)) {
+		allocator_info.pTypeExternalMemoryHandleTypes = export_memory_allocate_info_vector.ptr();
+		allocator_info.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
+		err = vmaCreateAllocator(&allocator_info, &external_allocator);
+		if (err != OK) {
+			print_line("GODOT FDM ERROR vmaCreateAllocator failed", err);
+		}
+		ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "vmaCreateAllocator failed with error " + itos(err) + ".");
+	} else {
+		print_line("GODOT FDM ERROR Extensions Unsupported for dedicated allocation");
+	}
 
 	return OK;
 }
@@ -1489,6 +1523,7 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 	context_device = context_driver->device_get(p_device_index);
 	physical_device = context_driver->physical_device_get(p_device_index);
 	vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
+	vkGetPhysicalDeviceMemoryProperties(physical_device, &physical_device_memory_properties);
 
 	frame_count = p_frame_count;
 
@@ -1837,17 +1872,33 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
+	///
+	bool fdm_hack = (p_format.usage_bits & TEXTURE_USAGE_VRS_ATTACHMENT_BIT) && (p_format.usage_bits & TEXTURE_USAGE_VRS_FRAGMENT_DENSITY_MAP_BIT);
+	VkExternalMemoryImageCreateInfo external_memory_image_info = {};
+	if (fdm_hack) {
+		external_memory_image_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+#ifdef _WIN32
+		external_memory_image_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+		external_memory_image_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+		external_memory_image_info.pNext = create_info.pNext;
+		create_info.pNext = &external_memory_image_info;
+	}
+	///
+
 	// Allocate memory.
 
 	uint32_t width = 0, height = 0;
 	uint32_t image_size = get_image_format_required_size(p_format.format, p_format.width, p_format.height, p_format.depth, p_format.mipmaps, &width, &height);
 
+	VmaAllocator &chosen_allocator = fdm_hack ? external_allocator : allocator;
 	VmaAllocationCreateInfo alloc_create_info = {};
 	alloc_create_info.flags = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : 0;
 	alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	if (image_size <= SMALL_ALLOCATION_MAX_SIZE) {
 		uint32_t mem_type_index = 0;
-		vmaFindMemoryTypeIndexForImageInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
+		vmaFindMemoryTypeIndexForImageInfo(chosen_allocator, &create_info, &alloc_create_info, &mem_type_index);
 		alloc_create_info.pool = _find_or_create_small_allocs_pool(mem_type_index);
 	}
 
@@ -1859,10 +1910,91 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 
 	VkResult err = vkCreateImage(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE), &vk_image);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImage failed with error " + itos(err) + ".");
-	err = vmaAllocateMemoryForImage(allocator, vk_image, &alloc_create_info, &allocation, &alloc_info);
+	err = vmaAllocateMemoryForImage(chosen_allocator, vk_image, &alloc_create_info, &allocation, &alloc_info);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "Can't allocate memory for image, error: " + itos(err) + ".");
-	err = vmaBindImageMemory2(allocator, allocation, 0, vk_image, nullptr);
+	err = vmaBindImageMemory2(chosen_allocator, allocation, 0, vk_image, nullptr);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "Can't bind memory to image, error: " + itos(err) + ".");
+
+	///
+	if (fdm_hack) {
+#ifdef _WIN32
+		VkMemoryGetWin32HandleInfoKHR get_win32_handle_info = {};
+		get_win32_handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+		get_win32_handle_info.memory = alloc_info.deviceMemory;
+		get_win32_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+		HANDLE win32_handle = NULL;
+		err = device_functions.GetMemoryWin32HandleKHR(vk_device, &get_win32_handle_info, &win32_handle);
+		if (err == VK_SUCCESS) {
+			VkImportMemoryWin32HandleInfoKHR import_memory_win32_handle_info = {};
+			import_memory_win32_handle_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+			import_memory_win32_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+			import_memory_win32_handle_info.handle = win32_handle;
+
+			VkDeviceMemory device_memory;
+			VkMemoryAllocateInfo memory_allocate_info = {};
+			memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+			memory_allocate_info.memoryTypeIndex = 0;
+			memory_allocate_info.allocationSize = 0;
+			memory_allocate_info.pNext = &import_memory_win32_handle_info;
+			err = vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &device_memory);
+			if (err == VK_SUCCESS) {
+				err = vkBindImageMemory(vk_device, vk_image, device_memory, 0);
+				if (err == VK_SUCCESS) {
+					print_line("GODOT FDM SUCCESS vkBindImageMemory apparently bound the image to the external memory");
+				} else {
+					print_line("GODOT FDM ERROR vkBindImageMemory FAILED with code", err);
+				}
+			} else {
+				print_line("GODOT FDM ERROR vkAllocateMemory FAILED with code", err);
+			}
+		} else {
+			print_line("GODOT FDM ERROR GetMemoryWin32HandleKHR FAILED with code", err);
+		}
+#else
+		if (device_functions.GetMemoryFdKHR != nullptr) {
+			VkMemoryGetFdInfoKHR get_fd_info = {};
+			get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+			get_fd_info.memory = alloc_info.deviceMemory;
+			get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+			int fd = 0;
+			err = device_functions.GetMemoryFdKHR(vk_device, &get_fd_info, &fd);
+			if (err == VK_SUCCESS) {
+				print_line("GODOT FDM PROGRESS GetMemoryFdKHR returned fd", fd);
+
+				VkImportMemoryFdInfoKHR import_memory_fd_info = {};
+				import_memory_fd_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+				import_memory_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+				import_memory_fd_info.fd = fd;
+
+				VkDeviceMemory device_memory;
+				VkMemoryAllocateInfo memory_allocate_info = {};
+				memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+				memory_allocate_info.memoryTypeIndex = 0;
+				memory_allocate_info.allocationSize = 0;
+				memory_allocate_info.pNext = &import_memory_fd_info;
+
+				err = vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &device_memory);
+				if (err == VK_SUCCESS) {
+					err = vkBindImageMemory(vk_device, vk_image, device_memory, 0);
+					if (err == VK_SUCCESS) {
+						print_line("GODOT FDM SUCCESS vkBindImageMemory apparently bound the image to the external memory");
+					} else {
+						print_line("GODOT FDM ERROR vkBindImageMemory FAILED with code", err);
+					}
+				} else {
+					print_line("GODOT FDM ERROR vkAllocateMemory FAILED with code", err);
+				}
+			} else {
+				print_line("GODOT FDM ERROR GetMemoryFdKHR FAILED with code", err);
+			}
+		} else {
+			print_line("GODOT FDM ERROR GetMemoryFdKHR not available");
+		}
+#endif
+	}
+	///
 
 	// Create view.
 
@@ -1897,7 +2029,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &vk_image_view);
 	if (err) {
 		vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
-		vmaFreeMemory(allocator, allocation);
+		vmaFreeMemory(chosen_allocator, allocation);
 		ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
 	}
 
@@ -1910,7 +2042,8 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	tex_info->vk_create_info = create_info;
 	tex_info->vk_view_create_info = image_view_create_info;
 	tex_info->allocation.handle = allocation;
-	vmaGetAllocationInfo(allocator, tex_info->allocation.handle, &tex_info->allocation.info);
+	tex_info->fdm_hack = fdm_hack;
+	vmaGetAllocationInfo(chosen_allocator, tex_info->allocation.handle, &tex_info->allocation.info);
 
 #if PRINT_NATIVE_COMMANDS
 	print_line(vformat("vkCreateImageView: 0x%uX for 0x%uX", uint64_t(vk_image_view), uint64_t(vk_image)));
@@ -2070,7 +2203,7 @@ void RenderingDeviceDriverVulkan::texture_free(TextureID p_texture) {
 	vkDestroyImageView(vk_device, tex_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
 	if (tex_info->allocation.handle) {
 		vkDestroyImage(vk_device, tex_info->vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER));
-		vmaFreeMemory(allocator, tex_info->allocation.handle);
+		vmaFreeMemory(tex_info->fdm_hack ? external_allocator : allocator, tex_info->allocation.handle);
 	}
 	VersatileResource::free(resources_allocator, tex_info);
 }
@@ -5962,6 +6095,7 @@ RenderingDeviceDriverVulkan::~RenderingDeviceDriverVulkan() {
 		small_allocs_pools.remove(E);
 	}
 	vmaDestroyAllocator(allocator);
+	vmaDestroyAllocator(external_allocator);
 
 	if (vk_device != VK_NULL_HANDLE) {
 		vkDestroyDevice(vk_device, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE));
