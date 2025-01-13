@@ -1583,7 +1583,7 @@ void RendererCanvasRenderRD::CanvasShaderData::set_code(const String &p_code) {
 	pipeline_hash_map.clear_pipelines();
 
 	if (version.is_null()) {
-		version = canvas_singleton->shader.canvas_shader.version_create();
+		version = canvas_singleton->shader.canvas_shader.version_create(false);
 	}
 
 #if 0
@@ -1622,6 +1622,11 @@ RS::ShaderNativeSourceCode RendererCanvasRenderRD::CanvasShaderData::get_native_
 	RendererCanvasRenderRD *canvas_singleton = static_cast<RendererCanvasRenderRD *>(RendererCanvasRender::singleton);
 	MutexLock lock(canvas_singleton->shader.mutex);
 	return canvas_singleton->shader.canvas_shader.version_get_native_source_code(version);
+}
+
+Pair<ShaderRD *, RID> RendererCanvasRenderRD::CanvasShaderData::get_native_shader_and_version() const {
+	RendererCanvasRenderRD *canvas_singleton = static_cast<RendererCanvasRenderRD *>(RendererCanvasRender::singleton);
+	return { &canvas_singleton->shader.canvas_shader, version };
 }
 
 RID RendererCanvasRenderRD::CanvasShaderData::get_shader(ShaderVariant p_shader_variant, bool p_ubershader) const {

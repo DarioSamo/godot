@@ -818,7 +818,7 @@ private:
 	// to do quick validation and ensuring the user
 	// does not submit something invalid.
 
-	struct Shader : public ShaderDescription {
+	struct Shader : public ShaderReflection {
 		String name; // Used for debug.
 		RDD::ShaderID driver_id;
 		uint32_t layout_hash = 0;

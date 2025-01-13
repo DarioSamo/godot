@@ -36,9 +36,12 @@ using namespace RendererRD;
 
 FSR::FSR() {
 	Vector<String> FSR_upscale_modes;
+#if 0
 	if (RD::get_singleton()->has_feature(RD::SUPPORTS_FSR_HALF_FLOAT)) {
 		FSR_upscale_modes.push_back("\n#define MODE_FSR_UPSCALE_NORMAL\n");
-	} else {
+	} else
+#endif
+	{
 		FSR_upscale_modes.push_back("\n#define MODE_FSR_UPSCALE_FALLBACK\n");
 	}
 

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  rendering_device_driver.cpp                                           */
+/*  shader_baker_export_plugin.h                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,36 +28,55 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "rendering_device_driver.h"
+#ifndef SHADER_BAKER_EXPORT_PLUGIN_H
+#define SHADER_BAKER_EXPORT_PLUGIN_H
 
-/**************/
-/**** MISC ****/
-/**************/
+#include "editor/export/editor_export_plugin.h"
+#include "servers/rendering/renderer_rd/shader_rd.h"
+#include "servers/rendering/rendering_shader_container.h"
 
-uint64_t RenderingDeviceDriver::api_trait_get(ApiTrait p_trait) {
-	// Sensible canonical defaults.
-	switch (p_trait) {
-		case API_TRAIT_HONORS_PIPELINE_BARRIERS:
-			return 1;
-		case API_TRAIT_SHADER_CHANGE_INVALIDATION:
-			return SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS;
-		case API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT:
-			return 1;
-		case API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP:
-			return 1;
-		case API_TRAIT_SECONDARY_VIEWPORT_SCISSOR:
-			return 1;
-		case API_TRAIT_CLEARS_WITH_COPY_ENGINE:
-			return true;
-		case API_TRAIT_USE_GENERAL_IN_COPY_QUEUES:
-			return false;
-		case API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS:
-			return false;
-		default:
-			ERR_FAIL_V(0);
-	}
-}
+class ShaderBakerExportPlugin : public EditorExportPlugin {
+protected:
+	struct WorkItem {
+		String cache_path;
+		String shader_name;
+		Vector<String> stage_sources;
+		int64_t variant = 0;
+	};
 
-/******************/
+	struct WorkResult {
+		// Since this result is per group, this vector will have gaps in the data it covers as the indices must stay relative to all variants.
+		Vector<PackedByteArray> variant_data;
+	};
 
-RenderingDeviceDriver::~RenderingDeviceDriver() {}
+	struct ShaderGroupItem {
+		String cache_path;
+		LocalVector<int> variants;
+		LocalVector<WorkerThreadPool::TaskID> variant_tasks;
+	};
+
+	RBSet<String> shader_paths_processed;
+	HashMap<String, WorkResult> shader_work_results;
+	Mutex shader_work_results_mutex;
+	LocalVector<ShaderGroupItem> shader_group_items;
+	RenderingShaderContainerFormat *shader_container_format = nullptr;
+
+#ifdef D3D12_ENABLED
+	void *lib_d3d12 = nullptr;
+#endif
+
+	virtual String get_name() const override;
+	virtual bool _initialize_container_format(const Ref<EditorExportPlatform> &p_platform, const Vector<String> &p_features);
+	virtual bool _begin_customize_resources(const Ref<EditorExportPlatform> &p_platform, const Vector<String> &p_features) override;
+	virtual void _end_customize_resources() override;
+	virtual Ref<Resource> _customize_resource(const Ref<Resource> &p_resource, const String &p_path) override;
+	virtual uint64_t _get_customization_configuration_hash() const override;
+	virtual void _customize_shader_version(ShaderRD *p_shader, RID p_version);
+	void _process_work_item(WorkItem p_work_item);
+
+public:
+	ShaderBakerExportPlugin();
+	virtual ~ShaderBakerExportPlugin() override;
+};
+
+#endif // SHADER_BAKER_EXPORT_PLUGIN_H

@@ -3240,11 +3240,30 @@ String RenderingDevice::_shader_uniform_debug(RID p_shader, int p_set) {
 }
 
 String RenderingDevice::shader_get_binary_cache_key() const {
-	return driver->shader_get_binary_cache_key();
+	return driver->get_shader_container_format().get_cache_key();
 }
 
 Vector<uint8_t> RenderingDevice::shader_compile_binary_from_spirv(const Vector<ShaderStageSPIRVData> &p_spirv, const String &p_shader_name) {
-	return driver->shader_compile_binary_from_spirv(p_spirv, p_shader_name);
+	ShaderReflection shader_refl;
+	if (reflect_spirv(p_spirv, shader_refl) != OK) {
+		return Vector<uint8_t>();
+	}
+
+	uint64_t max_bound_uniform_sets = driver->limit_get(LIMIT_MAX_BOUND_UNIFORM_SETS);
+	ERR_FAIL_COND_V_MSG((uint32_t)shader_refl.uniform_sets.size() > max_bound_uniform_sets, Vector<uint8_t>(),
+			"Number of uniform sets is larger than what is supported by the hardware (" + itos(max_bound_uniform_sets) + ").");
+
+	const RenderingShaderContainerFormat &container_format = driver->get_shader_container_format();
+	Ref<RenderingShaderContainer> shader_container = container_format.create_container();
+	ERR_FAIL_NULL_V(shader_container, Vector<uint8_t>());
+
+	shader_container->set_from_shader_reflection(p_shader_name, shader_refl);
+
+	// Compile shader binary from SPIR-V.
+	bool code_compiled = shader_container->set_code_from_spirv(p_spirv, {});
+	ERR_FAIL_COND_V_MSG(!code_compiled, Vector<uint8_t>(), vformat("Failed to compile code to native for SPIR-V."));
+
+	return shader_container->to_bytes();
 }
 
 RID RenderingDevice::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, RID p_placeholder) {
@@ -3258,8 +3277,11 @@ RID RenderingDevice::shader_create_from_bytecode(const Vector<uint8_t> &p_shader
 RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder, const Vector<PipelineImmutableSampler> &p_immutable_samplers) {
 	_THREAD_SAFE_METHOD_
 
-	ShaderDescription shader_desc;
-	String name;
+	Ref<RenderingShaderContainer> shader_container = driver->get_shader_container_format().create_container();
+	ERR_FAIL_NULL_V(shader_container, RID());
+
+	bool parsed_container = shader_container->from_bytes(p_shader_binary);
+	ERR_FAIL_COND_V_MSG(!parsed_container, RID(), "Failed to parse shader container from binary.");
 
 	Vector<RDD::ImmutableSampler> driver_immutable_samplers;
 	for (const PipelineImmutableSampler &source_sampler : p_immutable_samplers) {
@@ -3274,7 +3296,8 @@ RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint
 
 		driver_immutable_samplers.append(driver_sampler);
 	}
-	RDD::ShaderID shader_id = driver->shader_create_from_bytecode(p_shader_binary, shader_desc, name, driver_immutable_samplers);
+
+	RDD::ShaderID shader_id = driver->shader_create_from_container(shader_container, driver_immutable_samplers);
 	ERR_FAIL_COND_V(!shader_id, RID());
 
 	// All good, let's create modules.
@@ -3289,8 +3312,8 @@ RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint
 	Shader *shader = shader_owner.get_or_null(id);
 	ERR_FAIL_NULL_V(shader, RID());
 
-	*((ShaderDescription *)shader) = shader_desc; // ShaderDescription bundle.
-	shader->name = name;
+	*((ShaderReflection *)shader) = shader_container->get_shader_reflection();
+	shader->name = shader_container->shader_name;
 	shader->driver_id = shader_id;
 	shader->layout_hash = driver->shader_get_layout_hash(shader_id);
 
@@ -3316,7 +3339,7 @@ RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint
 		shader->set_formats.push_back(format);
 	}
 
-	for (ShaderStage stage : shader_desc.stages) {
+	for (ShaderStage stage : shader->stages_vector) {
 		switch (stage) {
 			case SHADER_STAGE_VERTEX:
 				shader->stage_bits.set_flag(RDD::PIPELINE_STAGE_VERTEX_SHADER_BIT);
