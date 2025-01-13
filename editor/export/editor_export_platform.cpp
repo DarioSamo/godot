@@ -1149,29 +1149,33 @@ Error EditorExportPlatform::export_project_files(const Ref<EditorExportPreset> &
 		}
 	};
 
-	// Always sort by name, to so if for some reason they are re-arranged, it still works.
-	export_plugins.sort_custom<SortByName>();
-
-	for (int i = 0; i < export_plugins.size(); i++) {
-		if (p_so_func) {
-			for (int j = 0; j < export_plugins[i]->shared_objects.size(); j++) {
-				err = p_so_func(p_udata, export_plugins[i]->shared_objects[j]);
+	auto add_shared_objects_and_extra_files_from_export_plugins = [&]() {
+		for (int i = 0; i < export_plugins.size(); i++) {
+			if (p_so_func) {
+				for (int j = 0; j < export_plugins[i]->shared_objects.size(); j++) {
+					err = p_so_func(p_udata, export_plugins[i]->shared_objects[j]);
+					if (err != OK) {
+						return err;
+					}
+				}
+			}
+			for (int j = 0; j < export_plugins[i]->extra_files.size(); j++) {
+				err = p_save_func(p_udata, export_plugins[i]->extra_files[j].path, export_plugins[i]->extra_files[j].data, 0, paths.size(), enc_in_filters, enc_ex_filters, key, seed);
 				if (err != OK) {
 					return err;
 				}
-			}
-		}
-		for (int j = 0; j < export_plugins[i]->extra_files.size(); j++) {
-			err = p_save_func(p_udata, export_plugins[i]->extra_files[j].path, export_plugins[i]->extra_files[j].data, 0, paths.size(), enc_in_filters, enc_ex_filters, key, seed);
-			if (err != OK) {
-				return err;
+
+				extra_paths.push_back(export_plugins[i]->extra_files[j].path);
 			}
 
-			extra_paths.push_back(export_plugins[i]->extra_files[j].path);
+			export_plugins.write[i]->_clear();
 		}
 
-		export_plugins.write[i]->_clear();
-	}
+		return OK;
+	};
+
+	// Always sort by name, to so if for some reason they are re-arranged, it still works.
+	export_plugins.sort_custom<SortByName>();
 
 	HashSet<String> features = get_features(p_preset, p_debug);
 	PackedStringArray features_psa;
@@ -1201,6 +1205,12 @@ Error EditorExportPlatform::export_project_files(const Ref<EditorExportPreset> &
 			uint64_t hash = export_plugins[i]->_get_customization_configuration_hash();
 			custom_scene_hash = hash_murmur3_one_64(hash, custom_scene_hash);
 		}
+	}
+
+	// Add any files that might've been defined during the initial steps of the export plugins.
+	err = add_shared_objects_and_extra_files_from_export_plugins();
+	if (err != OK) {
+		return err;
 	}
 
 	HashMap<String, FileExportCache> export_cache;
@@ -1477,6 +1487,13 @@ Error EditorExportPlatform::export_project_files(const Ref<EditorExportPreset> &
 			plugin->_end_customize_scenes();
 		}
 	}
+
+	// Add any files that might've been defined during the final steps of the export plugins.
+	err = add_shared_objects_and_extra_files_from_export_plugins();
+	if (err != OK) {
+		return err;
+	}
+
 	//save config!
 
 	Vector<String> custom_list;

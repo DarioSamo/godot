@@ -153,6 +153,7 @@
 #include "editor/plugins/plugin_config_dialog.h"
 #include "editor/plugins/root_motion_editor_plugin.h"
 #include "editor/plugins/script_text_editor.h"
+#include "editor/plugins/shader_baker_export_plugin.h"
 #include "editor/plugins/text_editor.h"
 #include "editor/plugins/version_control_editor_plugin.h"
 #include "editor/plugins/visual_shader_editor_plugin.h"
@@ -7928,6 +7929,10 @@ EditorNode::EditorNode() {
 	dedicated_server_export_plugin.instantiate();
 
 	EditorExport::get_singleton()->add_export_plugin(dedicated_server_export_plugin);
+
+	Ref<ShaderBakerExportPlugin> shader_baker_export_plugin;
+	shader_baker_export_plugin.instantiate();
+	EditorExport::get_singleton()->add_export_plugin(shader_baker_export_plugin);
 
 	Ref<PackedSceneEditorTranslationParserPlugin> packed_scene_translation_parser_plugin;
 	packed_scene_translation_parser_plugin.instantiate();
