@@ -1832,6 +1832,10 @@ void EditorExportPlatformAndroid::get_preset_features(const Ref<EditorExportPres
 	r_features->push_back("etc2");
 	r_features->push_back("astc");
 
+	if (p_preset->get("shader_baker/export")) {
+		r_features->push_back("shader_baker");
+	}
+
 	Vector<ABI> abis = get_enabled_abis(p_preset);
 	for (int i = 0; i < abis.size(); ++i) {
 		r_features->push_back(abis[i].arch);
@@ -2000,6 +2004,8 @@ void EditorExportPlatformAndroid::get_export_options(List<ExportOption> *r_optio
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, LAUNCHER_ADAPTIVE_ICON_MONOCHROME_OPTION, PROPERTY_HINT_FILE, "*.png"), ""));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "graphics/opengl_debug"), false));
+
+	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "shader_baker/export"), false));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::INT, "xr_features/xr_mode", PROPERTY_HINT_ENUM, "Regular,OpenXR"), XR_MODE_REGULAR, false, true));
 

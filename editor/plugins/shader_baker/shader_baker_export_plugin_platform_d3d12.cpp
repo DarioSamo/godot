@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  rendering_device_driver.cpp                                           */
+/*  shader_baker_export_plugin_platform_d3d12.cpp                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,36 +28,31 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "rendering_device_driver.h"
+#include "shader_baker_export_plugin_platform_d3d12.h"
 
-/**************/
-/**** MISC ****/
-/**************/
+#include "drivers/d3d12/rendering_shader_container_d3d12.h"
 
-uint64_t RenderingDeviceDriver::api_trait_get(ApiTrait p_trait) {
-	// Sensible canonical defaults.
-	switch (p_trait) {
-		case API_TRAIT_HONORS_PIPELINE_BARRIERS:
-			return 1;
-		case API_TRAIT_SHADER_CHANGE_INVALIDATION:
-			return SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS;
-		case API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT:
-			return 1;
-		case API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP:
-			return 1;
-		case API_TRAIT_SECONDARY_VIEWPORT_SCISSOR:
-			return 1;
-		case API_TRAIT_CLEARS_WITH_COPY_ENGINE:
-			return true;
-		case API_TRAIT_USE_GENERAL_IN_COPY_QUEUES:
-			return false;
-		case API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS:
-			return false;
-		default:
-			ERR_FAIL_V(0);
+#include <Windows.h>
+
+RenderingShaderContainerFormat *ShaderBakerExportPluginPlatformD3D12::create_shader_container_format() {
+	if (lib_d3d12 == nullptr) {
+		lib_d3d12 = LoadLibraryW(L"D3D12.dll");
+		ERR_FAIL_NULL_V_MSG(lib_d3d12, nullptr, "Unable to load D3D12.dll.");
 	}
+
+	constexpr uint32_t required_shader_model = 0x60; // D3D_SHADER_MODEL_6_0
+	RenderingShaderContainerFormatD3D12 *shader_container_format_d3d12 = memnew(RenderingShaderContainerFormatD3D12);
+	shader_container_format_d3d12->set_lib_d3d12(lib_d3d12);
+	shader_container_format_d3d12->set_shader_model(required_shader_model);
+	return shader_container_format_d3d12;
 }
 
-/******************/
+bool ShaderBakerExportPluginPlatformD3D12::matches_driver(const String &p_driver) {
+	return p_driver == "d3d12";
+}
 
-RenderingDeviceDriver::~RenderingDeviceDriver() {}
+ShaderBakerExportPluginPlatformD3D12 ::~ShaderBakerExportPluginPlatformD3D12() {
+	if (lib_d3d12 != nullptr) {
+		FreeLibrary((HMODULE)(lib_d3d12));
+	}
+}

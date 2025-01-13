@@ -97,6 +97,7 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 	{
 		uint32_t stage_bit = 1 << p_stage;
 
+		// TODO: Make these be queried from arguments instead.
 		uint32_t subgroup_in_shaders = uint32_t(p_render_device->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS));
 		uint32_t subgroup_operations = uint32_t(p_render_device->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS));
 		if ((subgroup_in_shaders & stage_bit) == stage_bit) {
@@ -187,13 +188,6 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 	return ret;
 }
 
-static String _get_cache_key_function_glsl(const RenderingDevice *p_render_device) {
-	const RenderingDeviceDriver::Capabilities &capabilities = p_render_device->get_device_capabilities();
-	String version;
-	version = "SpirVGen=" + itos(glslang::GetSpirvGeneratorVersion()) + ", major=" + itos(capabilities.version_major) + ", minor=" + itos(capabilities.version_minor) + " , subgroup_size=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_SIZE)) + " , subgroup_ops=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS)) + " , subgroup_in_shaders=" + itos(p_render_device->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS)) + " , debug=" + itos(Engine::get_singleton()->is_generate_spirv_debug_info_enabled());
-	return version;
-}
-
 void initialize_glslang_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_CORE) {
 		return;
@@ -203,7 +197,6 @@ void initialize_glslang_module(ModuleInitializationLevel p_level) {
 	// and it's safe to call multiple times.
 	glslang::InitializeProcess();
 	RenderingDevice::shader_set_compile_to_spirv_function(_compile_shader_glsl);
-	RenderingDevice::shader_set_get_cache_key_function(_get_cache_key_function_glsl);
 }
 
 void uninitialize_glslang_module(ModuleInitializationLevel p_level) {

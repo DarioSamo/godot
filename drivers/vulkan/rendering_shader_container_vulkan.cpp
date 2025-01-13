@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  rendering_device_driver.cpp                                           */
+/*  rendering_shader_container_vulkan.cpp                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,36 +28,57 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "rendering_device_driver.h"
+#include "rendering_shader_container_vulkan.h"
 
-/**************/
-/**** MISC ****/
-/**************/
+#include "thirdparty/misc/smolv.h"
 
-uint64_t RenderingDeviceDriver::api_trait_get(ApiTrait p_trait) {
-	// Sensible canonical defaults.
-	switch (p_trait) {
-		case API_TRAIT_HONORS_PIPELINE_BARRIERS:
-			return 1;
-		case API_TRAIT_SHADER_CHANGE_INVALIDATION:
-			return SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS;
-		case API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT:
-			return 1;
-		case API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP:
-			return 1;
-		case API_TRAIT_SECONDARY_VIEWPORT_SCISSOR:
-			return 1;
-		case API_TRAIT_CLEARS_WITH_COPY_ENGINE:
-			return true;
-		case API_TRAIT_USE_GENERAL_IN_COPY_QUEUES:
-			return false;
-		case API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS:
-			return false;
-		default:
-			ERR_FAIL_V(0);
-	}
+// RenderingShaderContainerVulkan
+
+const uint32_t RenderingShaderContainerVulkan::FORMAT_VERSION = 1;
+
+uint32_t RenderingShaderContainerVulkan::_format() const {
+	return 0x43565053;
 }
 
-/******************/
+uint32_t RenderingShaderContainerVulkan::_format_version() const {
+	return FORMAT_VERSION;
+}
 
-RenderingDeviceDriver::~RenderingDeviceDriver() {}
+bool RenderingShaderContainerVulkan::_set_code_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv) {
+	smolv::ByteArray smolv_bytes;
+	PackedByteArray code_bytes;
+	shaders.resize(p_spirv.size());
+	for (int64_t i = 0; i < p_spirv.size(); i++) {
+		// smolv::Encode does not clear the array on its own. It is necessary to do this manually if capacity is reused between stages.
+		smolv_bytes.clear();
+
+		// Encode into smolv.
+		bool smolv_encoded = smolv::Encode(p_spirv[i].spirv.ptr(), p_spirv[i].spirv.size(), smolv_bytes, smolv::kEncodeFlagStripDebugInfo);
+		ERR_FAIL_COND_V_MSG(!smolv_encoded, false, "Failed to compress SPIR-V into smolv.");
+
+		code_bytes.resize(smolv_bytes.size());
+		memcpy(code_bytes.ptrw(), smolv_bytes.data(), code_bytes.size());
+
+		RenderingShaderContainer::Shader &shader = shaders.ptrw()[i];
+		uint32_t compressed_size = 0;
+		shader.code_decompressed_size = code_bytes.size();
+		shader.code_compressed_bytes.resize(code_bytes.size());
+
+		bool compressed = compress_code(code_bytes.ptr(), code_bytes.size(), shader.code_compressed_bytes.ptrw(), &compressed_size, &shader.code_compression_flags);
+		ERR_FAIL_COND_V_MSG(!compressed, false, vformat("Failed to compress native code to native for SPIR-V #%d.", i));
+
+		shader.code_compressed_bytes.resize(compressed_size);
+	}
+
+	return true;
+}
+
+// RenderingShaderContainerFormatVulkan
+
+Ref<RenderingShaderContainer> RenderingShaderContainerFormatVulkan::create_container() const {
+	return memnew(RenderingShaderContainerVulkan);
+}
+
+RenderingShaderContainerFormatVulkan::RenderingShaderContainerFormatVulkan() {}
+
+RenderingShaderContainerFormatVulkan::~RenderingShaderContainerFormatVulkan() {}

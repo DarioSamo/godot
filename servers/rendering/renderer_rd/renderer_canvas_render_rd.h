@@ -170,6 +170,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		virtual bool is_animated() const;
 		virtual bool casts_shadows() const;
 		virtual RS::ShaderNativeSourceCode get_native_source_code() const;
+		virtual Pair<ShaderRD *, RID> get_native_shader_and_version() const;
 		RID get_shader(ShaderVariant p_shader_variant, bool p_ubershader) const;
 		uint64_t get_vertex_input_mask(ShaderVariant p_shader_variant, bool p_ubershader);
 		bool is_valid() const;

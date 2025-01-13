@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  rendering_device_driver.cpp                                           */
+/*  shader_baker_export_plugin_platform_d3d12.h                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,36 +28,19 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "rendering_device_driver.h"
+#ifndef SHADER_BAKER_EXPORT_PLUGIN_PLATFORM_D3D12_H
+#define SHADER_BAKER_EXPORT_PLUGIN_PLATFORM_D3D12_H
 
-/**************/
-/**** MISC ****/
-/**************/
+#include "editor/plugins/shader_baker_export_plugin.h"
 
-uint64_t RenderingDeviceDriver::api_trait_get(ApiTrait p_trait) {
-	// Sensible canonical defaults.
-	switch (p_trait) {
-		case API_TRAIT_HONORS_PIPELINE_BARRIERS:
-			return 1;
-		case API_TRAIT_SHADER_CHANGE_INVALIDATION:
-			return SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS;
-		case API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT:
-			return 1;
-		case API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP:
-			return 1;
-		case API_TRAIT_SECONDARY_VIEWPORT_SCISSOR:
-			return 1;
-		case API_TRAIT_CLEARS_WITH_COPY_ENGINE:
-			return true;
-		case API_TRAIT_USE_GENERAL_IN_COPY_QUEUES:
-			return false;
-		case API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS:
-			return false;
-		default:
-			ERR_FAIL_V(0);
-	}
-}
+class ShaderBakerExportPluginPlatformD3D12 : public ShaderBakerExportPluginPlatform {
+private:
+	void *lib_d3d12 = nullptr;
 
-/******************/
+public:
+	virtual RenderingShaderContainerFormat *create_shader_container_format() override;
+	virtual bool matches_driver(const String &p_driver) override;
+	virtual ~ShaderBakerExportPluginPlatformD3D12() override;
+};
 
-RenderingDeviceDriver::~RenderingDeviceDriver() {}
+#endif // SHADER_BAKER_EXPORT_PLUGIN_PLATFORM_D3D12_H
