@@ -9116,10 +9116,10 @@ Error ShaderLanguage::_parse_shader(const HashMap<StringName, FunctionInfo> &p_f
 
 	bool check_device_limit_warnings = false;
 	{
+		// TODO: We should be enforcing an engine-level limit here. Not based on what the current device has!
 		RenderingDevice *device = RenderingDevice::get_singleton();
 		if (device != nullptr) {
 			check_device_limit_warnings = check_warnings && HAS_WARNING(ShaderWarning::DEVICE_LIMIT_EXCEEDED_FLAG);
-
 			max_uniform_buffer_size = device->limit_get(RenderingDevice::LIMIT_MAX_UNIFORM_BUFFER_SIZE);
 		}
 	}

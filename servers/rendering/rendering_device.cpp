@@ -3238,10 +3238,6 @@ Vector<uint8_t> RenderingDevice::shader_compile_binary_from_spirv(const Vector<S
 		return Vector<uint8_t>();
 	}
 
-	uint64_t max_bound_uniform_sets = driver->limit_get(LIMIT_MAX_BOUND_UNIFORM_SETS);
-	ERR_FAIL_COND_V_MSG((uint32_t)shader_refl.uniform_sets.size() > max_bound_uniform_sets, Vector<uint8_t>(),
-			"Number of uniform sets is larger than what is supported by the hardware (" + itos(max_bound_uniform_sets) + ").");
-
 	const RenderingShaderContainerFormat &container_format = driver->get_shader_container_format();
 	Ref<RenderingShaderContainer> shader_container = container_format.create_container();
 	ERR_FAIL_COND_V(shader_container.is_null(), Vector<uint8_t>());
