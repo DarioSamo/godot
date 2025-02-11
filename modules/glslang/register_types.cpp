@@ -52,8 +52,9 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 
 	int ClientInputSemanticsVersion = 100; // maps to, say, #define VULKAN 100
 
-	glslang::EShTargetClientVersion ClientVersion = p_language_version;
-	glslang::EShTargetLanguageVersion TargetVersion = p_spirv_version;
+	// The enum values can be converted directly.
+	glslang::EShTargetClientVersion ClientVersion = (glslang::EShTargetClientVersion)p_language_version;
+	glslang::EShTargetLanguageVersion TargetVersion = (glslang::EShTargetLanguageVersion)p_spirv_version;
 
 	glslang::TShader shader(stages[p_stage]);
 	CharString cs = p_source_code.ascii();

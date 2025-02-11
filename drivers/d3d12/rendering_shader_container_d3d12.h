@@ -172,6 +172,8 @@ public:
 	void set_lib_d3d12(void *p_lib_d3d12);
 	void set_shader_model(uint32_t p_shader_model);
 	virtual Ref<RenderingShaderContainer> create_container() const override;
+	virtual ShaderLanguageVersion get_shader_language_version() const override;
+	virtual ShaderSpirvVersion get_shader_spirv_version() const override;
 	RenderingShaderContainerFormatD3D12();
 	virtual ~RenderingShaderContainerFormatD3D12();
 };

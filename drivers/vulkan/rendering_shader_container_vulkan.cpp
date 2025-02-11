@@ -79,6 +79,14 @@ Ref<RenderingShaderContainer> RenderingShaderContainerFormatVulkan::create_conta
 	return memnew(RenderingShaderContainerVulkan);
 }
 
+RenderingDeviceCommons::ShaderLanguageVersion RenderingShaderContainerFormatVulkan::get_shader_language_version() const {
+	return SHADER_LANGUAGE_VULKAN_VERSION_1_1;
+}
+
+RenderingDeviceCommons::ShaderSpirvVersion RenderingShaderContainerFormatVulkan::get_shader_spirv_version() const {
+	return SHADER_SPIRV_VERSION_1_5;
+}
+
 RenderingShaderContainerFormatVulkan::RenderingShaderContainerFormatVulkan() {}
 
 RenderingShaderContainerFormatVulkan::~RenderingShaderContainerFormatVulkan() {}

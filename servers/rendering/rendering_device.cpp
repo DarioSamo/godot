@@ -208,7 +208,9 @@ Vector<uint8_t> RenderingDevice::shader_compile_spirv_from_source(ShaderStage p_
 
 	ERR_FAIL_NULL_V(compile_to_spirv_function, Vector<uint8_t>());
 
-	return compile_to_spirv_function(p_stage, ShaderIncludeDB::parse_include_files(p_source_code), p_language, r_error, this);
+	ShaderLanguageVersion language_version = driver->get_shader_container_format().get_shader_language_version();
+	ShaderSpirvVersion spirv_version = driver->get_shader_container_format().get_shader_spirv_version();
+	return compile_to_spirv_function(p_stage, ShaderIncludeDB::parse_include_files(p_source_code), p_language, language_version, spirv_version, r_error);
 }
 
 RID RenderingDevice::shader_create_from_spirv(const Vector<ShaderStageSPIRVData> &p_spirv, const String &p_shader_name) {

@@ -566,6 +566,29 @@ public:
 		SHADER_STAGE_COMPUTE_BIT = (1 << SHADER_STAGE_COMPUTE),
 	};
 
+	enum ShaderLanguage {
+		SHADER_LANGUAGE_GLSL,
+		SHADER_LANGUAGE_HLSL
+	};
+
+	enum ShaderLanguageVersion {
+		SHADER_LANGUAGE_VULKAN_VERSION_1_0 = (1 << 22),
+		SHADER_LANGUAGE_VULKAN_VERSION_1_1 = (1 << 22) | (1 << 12),
+		SHADER_LANGUAGE_VULKAN_VERSION_1_2 = (1 << 22) | (2 << 12),
+		SHADER_LANGUAGE_VULKAN_VERSION_1_3 = (1 << 22) | (3 << 12),
+		SHADER_LANGUAGE_OPENGL_VERSION_4_5_0 = 450
+	};
+
+	enum ShaderSpirvVersion {
+		SHADER_SPIRV_VERSION_1_0 = (1 << 16),
+		SHADER_SPIRV_VERSION_1_1 = (1 << 16) | (1 << 8),
+		SHADER_SPIRV_VERSION_1_2 = (1 << 16) | (2 << 8),
+		SHADER_SPIRV_VERSION_1_3 = (1 << 16) | (3 << 8),
+		SHADER_SPIRV_VERSION_1_4 = (1 << 16) | (4 << 8),
+		SHADER_SPIRV_VERSION_1_5 = (1 << 16) | (5 << 8),
+		SHADER_SPIRV_VERSION_1_6 = (1 << 16) | (6 << 8)
+	};
+
 	struct ShaderStageSPIRVData {
 		ShaderStage shader_stage = SHADER_STAGE_MAX;
 		Vector<uint8_t> spirv;
