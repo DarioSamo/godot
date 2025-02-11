@@ -107,7 +107,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		MAX_RENDER_ITEMS = 256 * 1024,
 		MAX_LIGHT_TEXTURES = 1024,
 		MAX_LIGHTS_PER_ITEM = 16,
-		DEFAULT_MAX_LIGHTS_PER_RENDER = 256
+		MAX_LIGHTS_PER_RENDER = 256
 	};
 
 	/****************/
@@ -572,7 +572,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 		LightUniform *light_uniforms = nullptr;
 
-		RID lights_uniform_buffer;
+		RID lights_storage_buffer;
 		RID canvas_state_buffer;
 		RID shadow_sampler;
 		RID shadow_texture;
@@ -585,8 +585,6 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		RID shadow_ocluder_uniform_set;
 
 		RID default_transforms_uniform_set;
-
-		uint32_t max_lights_per_render;
 
 		double time;
 

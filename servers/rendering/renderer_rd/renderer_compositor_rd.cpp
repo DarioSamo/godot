@@ -157,6 +157,8 @@ void RendererCompositorRD::initialize() {
 
 		blit.sampler = RD::get_singleton()->sampler_create(RD::SamplerState());
 	}
+
+	multiview_supported = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTIVIEW);
 }
 
 uint64_t RendererCompositorRD::frame = 1;
