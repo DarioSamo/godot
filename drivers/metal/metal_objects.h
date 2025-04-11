@@ -575,34 +575,6 @@ struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) BindingInfo {
 		desc.arrayLength = arrayLength;
 		return desc;
 	}
-
-	size_t serialize_size() const {
-		return sizeof(uint32_t) * 8 /* 8 uint32_t fields */;
-	}
-
-	template <typename W>
-	void serialize(W &p_writer) const {
-		p_writer.write((uint32_t)dataType);
-		p_writer.write(index);
-		p_writer.write((uint32_t)access);
-		p_writer.write((uint32_t)usage);
-		p_writer.write((uint32_t)textureType);
-		p_writer.write(imageFormat);
-		p_writer.write(arrayLength);
-		p_writer.write(isMultisampled);
-	}
-
-	template <typename R>
-	void deserialize(R &p_reader) {
-		p_reader.read((uint32_t &)dataType);
-		p_reader.read(index);
-		p_reader.read((uint32_t &)access);
-		p_reader.read((uint32_t &)usage);
-		p_reader.read((uint32_t &)textureType);
-		p_reader.read((uint32_t &)imageFormat);
-		p_reader.read(arrayLength);
-		p_reader.read(isMultisampled);
-	}
 };
 
 using RDC = RenderingDeviceCommons;

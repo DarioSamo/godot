@@ -152,16 +152,12 @@ private:
 	RenderingShaderContainerFormatMetal *owner = nullptr;
 	bool export_mode = false;
 
-	bool shader_compile_binary_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv);
-
 	Error compile_metal_source(const char *p_source, const StageData &p_stage_data, Vector<uint8_t> r_binary_data);
-	bool shader_compile_binary_from_spirv_v2(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv);
 
 public:
 	static constexpr uint32_t FORMAT_VERSION = 1;
 
 	RDD::ShaderID create_shader(const Vector<RDD::ImmutableSampler> &p_immutable_samplers);
-	RDD::ShaderID create_shader_v2(const Vector<RDD::ImmutableSampler> &p_immutable_samplers);
 
 	void set_owner(const RenderingShaderContainerFormatMetal *p_owner) { owner = (RenderingShaderContainerFormatMetal *)p_owner; }
 	void set_export_mode(bool p_export_mode) { export_mode = p_export_mode; }
