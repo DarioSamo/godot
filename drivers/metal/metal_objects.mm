@@ -1936,7 +1936,11 @@ void ShaderCacheEntry::notify_free() const {
 }
 
 @interface MDLibrary ()
-- (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry;
+- (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry
+#ifdef DEV_ENABLED
+							source:(NSString *)source;
+#endif
+;
 @end
 
 /// Loads the MTLLibrary when the library is first accessed.
@@ -1978,6 +1982,9 @@ void ShaderCacheEntry::notify_free() const {
 }
 - (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry
 							device:(id<MTLDevice>)device
+#ifdef DEV_ENABLED
+							source:(NSString *)source
+#endif
 							  data:(dispatch_data_t)data;
 @end
 
@@ -2000,9 +2007,23 @@ void ShaderCacheEntry::notify_free() const {
 
 + (instancetype)newLibraryWithCacheEntry:(ShaderCacheEntry *)entry
 								  device:(id<MTLDevice>)device
+#ifdef DEV_ENABLED
+								  source:(NSString *)source
+#endif
 									data:(dispatch_data_t)data {
-	return [[MDBinaryLibrary alloc] initWithCacheEntry:entry device:device data:data];
+	return [[MDBinaryLibrary alloc] initWithCacheEntry:entry
+												device:device
+#ifdef DEV_ENABLED
+												source:source
+#endif
+												  data:data];
 }
+
+#ifdef DEV_ENABLED
+- (NSString *)originalSource {
+	return _original_source;
+}
+#endif
 
 - (id<MTLLibrary>)library {
 	CRASH_NOW_MSG("Not implemented");
@@ -2017,10 +2038,17 @@ void ShaderCacheEntry::notify_free() const {
 - (void)setLabel:(NSString *)label {
 }
 
-- (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry {
+- (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry
+#ifdef DEV_ENABLED
+							source:(NSString *)source
+#endif
+{
 	self = [super init];
 	_entry = entry;
 	_entry->library = self;
+#ifdef DEV_ENABLED
+	_original_source = source;
+#endif
 	return self;
 }
 
@@ -2036,7 +2064,11 @@ void ShaderCacheEntry::notify_free() const {
 							device:(id<MTLDevice>)device
 							source:(NSString *)source
 						   options:(MTLCompileOptions *)options {
-	self = [super initWithCacheEntry:entry];
+	self = [super initWithCacheEntry:entry
+#ifdef DEV_ENABLED
+							  source:source
+#endif
+	];
 	_complete = false;
 	_ready = false;
 
@@ -2088,7 +2120,11 @@ void ShaderCacheEntry::notify_free() const {
 							device:(id<MTLDevice>)device
 							source:(NSString *)source
 						   options:(MTLCompileOptions *)options {
-	self = [super initWithCacheEntry:entry];
+	self = [super initWithCacheEntry:entry
+#ifdef DEV_ENABLED
+							  source:source
+#endif
+	];
 	_device = device;
 	_source = source;
 	_options = options;
@@ -2138,8 +2174,15 @@ void ShaderCacheEntry::notify_free() const {
 
 - (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry
 							device:(id<MTLDevice>)device
+#ifdef DEV_ENABLED
+							source:(NSString *)source
+#endif
 							  data:(dispatch_data_t)data {
-	self = [super initWithCacheEntry:entry];
+	self = [super initWithCacheEntry:entry
+#ifdef DEV_ENABLED
+							  source:source
+#endif
+	];
 	NSError *error = nil;
 	_library = [device newLibraryWithData:data error:&error];
 	if (error != nil) {

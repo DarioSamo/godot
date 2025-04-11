@@ -45,14 +45,7 @@ class RenderingShaderContainerFormatMetal;
 class RenderingShaderContainerMetal : public RenderingShaderContainer {
 	GDCLASS(RenderingShaderContainerMetal, RenderingShaderContainer);
 
-	RenderingShaderContainerFormatMetal *owner = nullptr;
-	bool export_mode = false;
-
-	bool shader_compile_binary_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv);
-
 public:
-	static constexpr uint32_t FORMAT_VERSION = 1;
-
 	struct HeaderData {
 		enum Flags : uint32_t {
 			NONE = 0,
@@ -90,22 +83,108 @@ public:
 		}
 	};
 
-	struct ShaderData {
-
+	struct StageData {
+		uint32_t vertex_input_binding_mask = 0;
+		uint32_t is_position_invariant = 0;
+		uint32_t supports_fast_math = 0;
+		SHA256Digest hash;
+		uint32_t source_size = 0;
+		uint32_t library_size = 0;
+		uint32_t push_constant_binding = UINT32_MAX; // Metal binding
 	};
 
+	struct BindingInfoData {
+		uint32_t shader_stage = UINT32_MAX;
+		uint32_t data_type = 0; // MTLDataTypeNone
+		uint32_t index = 0;
+		uint32_t access = 0; // MTLBindingAccessReadOnly
+		uint32_t usage = 0; // MTLResourceUsage (none)
+		uint32_t texture_type = 2; // MTLTextureType2D
+		uint32_t image_format = 0;
+		uint32_t array_length = 0;
+		uint32_t is_multisampled = 0;
+	};
+
+	struct UniformData2 {
+		static constexpr uint32_t STAGE_INDEX[RenderingDeviceCommons::SHADER_STAGE_MAX] = {
+			0, // SHADER_STAGE_VERTEX
+			1, // SHADER_STAGE_FRAGMENT
+			0, // SHADER_STAGE_TESSELATION_CONTROL
+			1, // SHADER_STAGE_TESSELATION_EVALUATION
+			0, // SHADER_STAGE_COMPUTE
+		};
+
+		/// Specifies the stages the uniform data is
+		/// used by the Metal shader.
+		uint32_t active_stages = 0;
+		BindingInfoData bindings[2];
+		BindingInfoData bindings_secondary[2];
+
+		_FORCE_INLINE_ uint32_t get_index_for_stage(RenderingDeviceCommons::ShaderStage p_stage) const {
+			return STAGE_INDEX[p_stage];
+		}
+
+		_FORCE_INLINE_ BindingInfoData &get_binding_for_stage(RenderingDeviceCommons::ShaderStage p_stage) {
+			BindingInfoData &info = bindings[get_index_for_stage(p_stage)];
+			DEV_ASSERT(info.shader_stage == UINT32_MAX || info.shader_stage == p_stage);
+			info.shader_stage = p_stage;
+			return info;
+		}
+
+		_FORCE_INLINE_ BindingInfoData &get_secondary_binding_for_stage(RenderingDeviceCommons::ShaderStage p_stage) {
+			BindingInfoData &info = bindings_secondary[get_index_for_stage(p_stage)];
+			DEV_ASSERT(info.shader_stage == UINT32_MAX || info.shader_stage == p_stage);
+			info.shader_stage = p_stage;
+			return info;
+		}
+	};
+
+	struct SpecializationData {
+		uint32_t used_stages = 0;
+	};
+
+	HeaderData mtl_reflection_data; // compliment to reflection_data
+	Vector<StageData> mtl_shaders; // compliment to shaders
+	Vector<UniformData2> mtl_reflection_binding_set_uniforms_data; // compliment to reflection_binding_set_uniforms_data
+	Vector<SpecializationData> mtl_reflection_specialization_data; // compliment to reflection_specialization_data
+
+private:
+	RenderingShaderContainerFormatMetal *owner = nullptr;
+	bool export_mode = false;
+
+	bool shader_compile_binary_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv);
+
+	Error compile_metal_source(const char *p_source, const StageData &p_stage_data, Vector<uint8_t> r_binary_data);
+	bool shader_compile_binary_from_spirv_v2(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv);
+
+public:
+	static constexpr uint32_t FORMAT_VERSION = 1;
+
 	RDD::ShaderID create_shader(const Vector<RDD::ImmutableSampler> &p_immutable_samplers);
+	RDD::ShaderID create_shader_v2(const Vector<RDD::ImmutableSampler> &p_immutable_samplers);
 
 	void set_owner(const RenderingShaderContainerFormatMetal *p_owner) { owner = (RenderingShaderContainerFormatMetal *)p_owner; }
 	void set_export_mode(bool p_export_mode) { export_mode = p_export_mode; }
 
 protected:
+	virtual uint32_t _from_bytes_reflection_extra_data(const uint8_t *p_bytes) override;
+	virtual uint32_t _from_bytes_reflection_binding_uniform_extra_data_start(const uint8_t *p_bytes) override;
+	virtual uint32_t _from_bytes_reflection_binding_uniform_extra_data(const uint8_t *p_bytes, uint32_t p_index) override;
+	virtual uint32_t _from_bytes_reflection_specialization_extra_data_start(const uint8_t *p_bytes) override;
+	virtual uint32_t _from_bytes_reflection_specialization_extra_data(const uint8_t *p_bytes, uint32_t p_index) override;
+	virtual uint32_t _from_bytes_shader_extra_data_start(const uint8_t *p_bytes) override;
+	virtual uint32_t _from_bytes_shader_extra_data(const uint8_t *p_bytes, uint32_t p_index) override;
+
+	virtual uint32_t _to_bytes_reflection_extra_data(uint8_t *p_bytes) const override;
+	virtual uint32_t _to_bytes_reflection_binding_uniform_extra_data(uint8_t *p_bytes, uint32_t p_index) const override;
+	virtual uint32_t _to_bytes_reflection_specialization_extra_data(uint8_t *p_bytes, uint32_t p_index) const override;
+	virtual uint32_t _to_bytes_shader_extra_data(uint8_t *p_bytes, uint32_t p_index) const override;
+
 	virtual uint32_t _format() const override;
 	virtual uint32_t _format_version() const override;
 	virtual bool _set_code_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv) override;
 
 #pragma mark - Serialisation
-
 };
 
 class RenderingShaderContainerFormatMetal : public RenderingShaderContainerFormat {

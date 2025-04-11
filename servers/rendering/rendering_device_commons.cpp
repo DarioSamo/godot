@@ -974,13 +974,14 @@ const char *RenderingDeviceCommons::SHADER_STAGE_NAMES[SHADER_STAGE_MAX] = {
 Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_spirv, ShaderReflection &r_reflection) {
 	r_reflection = {};
 
-	for (uint32_t i = 0; i < p_spirv.size(); i++) {
+	const uint32_t spirv_size = p_spirv.size();
+	for (uint32_t i = 0; i < spirv_size; i++) {
 		ShaderStage stage = p_spirv[i].shader_stage;
 		ShaderStage stage_flag = (ShaderStage)(1 << p_spirv[i].shader_stage);
 
 		if (p_spirv[i].shader_stage == SHADER_STAGE_COMPUTE) {
 			r_reflection.is_compute = true;
-			ERR_FAIL_COND_V_MSG(p_spirv.size() != 1, FAILED,
+			ERR_FAIL_COND_V_MSG(spirv_size != 1, FAILED,
 					"Compute shaders can only receive one stage, dedicated to compute.");
 		}
 		ERR_FAIL_COND_V_MSG(r_reflection.stages_bits.has_flag(stage_flag), FAILED,
@@ -1096,7 +1097,11 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 					}
 
 					if (may_be_writable) {
-						uniform.writable = !(binding.type_description->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) && !(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+						if (binding.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+							uniform.writable = !(binding.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+						} else {
+							uniform.writable = !(binding.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) && !(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+						}
 					} else {
 						uniform.writable = false;
 					}
@@ -1219,9 +1224,15 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 					ERR_FAIL_COND_V_MSG(result != SPV_REFLECT_RESULT_SUCCESS, FAILED,
 							"Reflection of SPIR-V shader stage '" + String(SHADER_STAGE_NAMES[p_spirv[i].shader_stage]) + "' failed obtaining input variables.");
 
-					for (uint32_t j = 0; j < iv_count; j++) {
-						if (input_vars[j] && input_vars[j]->decoration_flags == 0) { // Regular input.
-							r_reflection.vertex_input_mask |= (((uint64_t)1) << input_vars[j]->location);
+					for (const SpvReflectInterfaceVariable *v : input_vars) {
+						if (!v) {
+							continue;
+						}
+						if (v->decoration_flags == 0) { // Regular input.
+							r_reflection.vertex_input_mask |= (((uint64_t)1) << v->location);
+						}
+						if (v->built_in == SpvBuiltInViewIndex || v->built_in == SpvBuiltInViewportIndex) {
+							r_reflection.has_multiview = true;
 						}
 					}
 				}
@@ -1241,10 +1252,15 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 					ERR_FAIL_COND_V_MSG(result != SPV_REFLECT_RESULT_SUCCESS, FAILED,
 							"Reflection of SPIR-V shader stage '" + String(SHADER_STAGE_NAMES[p_spirv[i].shader_stage]) + "' failed obtaining output variables.");
 
-					for (uint32_t j = 0; j < ov_count; j++) {
-						const SpvReflectInterfaceVariable *refvar = output_vars[j];
-						if (refvar != nullptr && refvar->built_in != SpvBuiltInFragDepth) {
+					for (const SpvReflectInterfaceVariable *refvar : output_vars) {
+						if (!refvar) {
+							continue;
+						}
+						if (refvar->built_in != SpvBuiltInFragDepth) {
 							r_reflection.fragment_output_mask |= 1 << refvar->location;
+						}
+						if (refvar->built_in == SpvBuiltInViewIndex || refvar->built_in == SpvBuiltInViewportIndex) {
+							r_reflection.has_multiview = true;
 						}
 					}
 				}
@@ -1285,6 +1301,11 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 		}
 
 		r_reflection.stages_bits.set_flag(stage_flag);
+	}
+
+	// Sort all uniform_sets by binding.
+	for (uint32_t i = 0; i < r_reflection.uniform_sets.size(); i++) {
+		r_reflection.uniform_sets.write[i].sort();
 	}
 
 	return OK;

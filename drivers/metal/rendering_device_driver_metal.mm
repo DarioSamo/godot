@@ -1093,6 +1093,9 @@ void RenderingDeviceDriverMetal::framebuffer_free(FramebufferID p_framebuffer) {
 
 RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref<RenderingShaderContainer> &p_shader_container, const Vector<ImmutableSampler> &p_immutable_samplers) {
 	Ref<RenderingShaderContainerMetal> shader_container = p_shader_container;
+	if (String v = OS::get_singleton()->get_environment("GODOT_SPIRV_FORMAT"); v == U"v2") {
+		return shader_container->create_shader_v2(p_immutable_samplers);
+	}
 	return shader_container->create_shader(p_immutable_samplers);
 }
 

@@ -655,10 +655,14 @@ struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalShaderCache {
 /// A Metal shader library.
 @interface MDLibrary : NSObject {
 	ShaderCacheEntry *_entry;
+	NSString *_original_source;
 };
 - (id<MTLLibrary>)library;
 - (NSError *)error;
 - (void)setLabel:(NSString *)label;
+#ifdef DEV_ENABLED
+- (NSString *)originalSource;
+#endif
 
 + (instancetype)newLibraryWithCacheEntry:(ShaderCacheEntry *)entry
 								  device:(id<MTLDevice>)device
@@ -668,6 +672,9 @@ struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalShaderCache {
 
 + (instancetype)newLibraryWithCacheEntry:(ShaderCacheEntry *)entry
 								  device:(id<MTLDevice>)device
+#ifdef DEV_ENABLED
+								  source:(NSString *)source
+#endif
 									data:(dispatch_data_t)data;
 @end
 
@@ -720,9 +727,6 @@ public:
 	MTLSize local = {};
 
 	MDLibrary *kernel;
-#if DEV_ENABLED
-	CharString kernel_source;
-#endif
 
 	void encode_push_constant_data(VectorView<uint32_t> p_data, MDCommandBuffer *p_cb) final;
 
@@ -745,10 +749,6 @@ public:
 
 	MDLibrary *vert;
 	MDLibrary *frag;
-#if DEV_ENABLED
-	CharString vert_source;
-	CharString frag_source;
-#endif
 
 	void encode_push_constant_data(VectorView<uint32_t> p_data, MDCommandBuffer *p_cb) final;
 
