@@ -88,7 +88,7 @@ private:
 	static HashMap<uint32_t, MetalDeviceProfile> profiles;
 };
 
-class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingShaderContainerMetal : public RenderingShaderContainer {
+class RenderingShaderContainerMetal : public RenderingShaderContainer {
 	GDCLASS(RenderingShaderContainerMetal, RenderingShaderContainer);
 
 public:
