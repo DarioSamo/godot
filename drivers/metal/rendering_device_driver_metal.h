@@ -56,8 +56,6 @@ class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMet
 	RenderingContextDriver::Device context_device;
 	id<MTLDevice> device = nil;
 
-	uint32_t version_major = 2;
-	uint32_t version_minor = 0;
 	MetalDeviceProperties *device_properties = nullptr;
 	MetalDeviceProfile device_profile;
 	RenderingShaderContainerFormatMetal *shader_container_format = nullptr;

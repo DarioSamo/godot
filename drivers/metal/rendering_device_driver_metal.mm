@@ -2732,7 +2732,7 @@ const RDD::FragmentDensityMapCapabilities &RenderingDeviceDriverMetal::get_fragm
 }
 
 String RenderingDeviceDriverMetal::get_api_version() const {
-	return vformat("%d.%d", version_major, version_minor);
+	return vformat("%d.%d", capabilities.version_major, capabilities.version_minor);
 }
 
 String RenderingDeviceDriverMetal::get_pipeline_cache_uuid() const {
