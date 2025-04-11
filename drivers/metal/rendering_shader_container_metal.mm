@@ -45,53 +45,6 @@
 Mutex MetalDeviceProfile::profiles_lock;
 HashMap<uint32_t, MetalDeviceProfile> MetalDeviceProfile::profiles;
 
-MetalDeviceProfile::MetalDeviceProfile(MetalDeviceProperties *p_device_properties) {
-#if TARGET_OS_OSX
-	platform = Platform::macOS;
-	features = {
-		.mslVersionMajor = p_device_properties->features.mslVersionMajor,
-		.mslVersionMinor = p_device_properties->features.mslVersionMinor,
-		.argument_buffers_tier = ArgumentBuffersTier::Tier2,
-		.simdPermute = true
-	};
-#else
-	platform = Platform::iOS;
-	features = {
-		.mslVersionMajor = p_device_properties->features.mslVersionMajor,
-		.mslVersionMinor = p_device_properties->features.mslVersionMinor,
-		.argument_buffers_tier = p_device_properties->features.argument_buffers_tier == MTLArgumentBuffersTier1 ? ArgumentBuffersTier::Tier1 : ArgumentBuffersTier::Tier2,
-		.simdPermute = p_device_properties->features.simdPermute,
-	};
-#endif
-	// highestFamily will only be set to an Apple GPU family
-	switch (p_device_properties->features.highestFamily) {
-		case MTLGPUFamilyApple4:
-			gpu = GPU::Apple4;
-			break;
-		case MTLGPUFamilyApple5:
-			gpu = GPU::Apple5;
-			break;
-		case MTLGPUFamilyApple6:
-			gpu = GPU::Apple6;
-			break;
-		case MTLGPUFamilyApple7:
-			gpu = GPU::Apple7;
-			break;
-		case MTLGPUFamilyApple8:
-			gpu = GPU::Apple8;
-			break;
-		case MTLGPUFamilyApple9:
-			gpu = GPU::Apple9;
-			break;
-		case MTLGPUFamilyApple1:
-		case MTLGPUFamilyApple2:
-		case MTLGPUFamilyApple3:
-		default: {
-			CRASH_NOW_MSG("Unsupported GPU family");
-		} break;
-	}
-}
-
 const MetalDeviceProfile *MetalDeviceProfile::get_profile(MetalDeviceProfile::Platform p_platform, MetalDeviceProfile::GPU p_gpu) {
 	DEV_ASSERT(p_platform == Platform::macOS || p_platform == Platform::iOS);
 

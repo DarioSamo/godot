@@ -35,9 +35,6 @@
 #import "servers/rendering/rendering_device_driver.h"
 #import "servers/rendering/rendering_shader_container.h"
 
-struct ShaderCacheEntry;
-class MetalDeviceProperties;
-
 constexpr uint32_t R32UI_ALIGNMENT_CONSTANT_ID = 65535;
 
 class RenderingShaderContainerFormatMetal;
@@ -85,9 +82,6 @@ struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalDeviceProfile {
 	static const MetalDeviceProfile *get_profile(Platform p_platform, GPU p_gpu);
 
 	MetalDeviceProfile() = default;
-
-	/// Constructs a device profile from the given device properties.
-	MetalDeviceProfile(MetalDeviceProperties *p_device_properties);
 
 private:
 	static Mutex profiles_lock; ///< Mutex to protect access to the profiles map.
@@ -254,7 +248,7 @@ protected:
 	virtual bool _set_code_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv) override;
 };
 
-class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingShaderContainerFormatMetal : public RenderingShaderContainerFormat {
+class RenderingShaderContainerFormatMetal : public RenderingShaderContainerFormat {
 	bool export_mode = false;
 
 	const MetalDeviceProfile *device_profile = nullptr;

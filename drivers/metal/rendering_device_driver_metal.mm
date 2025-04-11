@@ -2824,13 +2824,64 @@ void RenderingDeviceDriverMetal::_check_capabilities() {
 	capabilities.version_minor = device_properties->features.mslVersionMinor;
 }
 
+MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *p_device_properties) {
+	using DP = MetalDeviceProfile;
+	MetalDeviceProfile res;
+#if TARGET_OS_OSX
+	res.platform = DP::Platform::macOS;
+	res.features = {
+		.mslVersionMajor = p_device_properties->features.mslVersionMajor,
+		.mslVersionMinor = p_device_properties->features.mslVersionMinor,
+		.argument_buffers_tier = DP::ArgumentBuffersTier::Tier2,
+		.simdPermute = true
+	};
+#else
+	res.platform = DP::Platform::iOS;
+	res.features = {
+		.mslVersionMajor = p_device_properties->features.mslVersionMajor,
+		.mslVersionMinor = p_device_properties->features.mslVersionMinor,
+		.argument_buffers_tier = p_device_properties->features.argument_buffers_tier == MTLArgumentBuffersTier1 ? DP::ArgumentBuffersTier::Tier1 : DP::ArgumentBuffersTier::Tier2,
+		.simdPermute = p_device_properties->features.simdPermute,
+	};
+#endif
+	// highestFamily will only be set to an Apple GPU family
+	switch (p_device_properties->features.highestFamily) {
+		case MTLGPUFamilyApple4:
+			res.gpu = DP::GPU::Apple4;
+			break;
+		case MTLGPUFamilyApple5:
+			res.gpu = DP::GPU::Apple5;
+			break;
+		case MTLGPUFamilyApple6:
+			res.gpu = DP::GPU::Apple6;
+			break;
+		case MTLGPUFamilyApple7:
+			res.gpu = DP::GPU::Apple7;
+			break;
+		case MTLGPUFamilyApple8:
+			res.gpu = DP::GPU::Apple8;
+			break;
+		case MTLGPUFamilyApple9:
+			res.gpu = DP::GPU::Apple9;
+			break;
+		case MTLGPUFamilyApple1:
+		case MTLGPUFamilyApple2:
+		case MTLGPUFamilyApple3:
+		default: {
+			CRASH_NOW_MSG("Unsupported GPU family");
+		} break;
+	}
+
+	return res;
+}
+
 Error RenderingDeviceDriverMetal::initialize(uint32_t p_device_index, uint32_t p_frame_count) {
 	context_device = context_driver->device_get(p_device_index);
 	Error err = _create_device();
 	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 
 	device_properties = memnew(MetalDeviceProperties(device));
-	device_profile = MetalDeviceProfile(device_properties);
+	device_profile = device_profile_from_properties(device_properties);
 	shader_container_format = memnew(RenderingShaderContainerFormatMetal(&device_profile));
 
 	_check_capabilities();
