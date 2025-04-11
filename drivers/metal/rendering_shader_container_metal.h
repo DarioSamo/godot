@@ -45,7 +45,7 @@ class RenderingShaderContainerFormatMetal;
 /// determine options for compiling SPIR-V to Metal source. It currently only
 /// contains the minimum properties required to transform shaders from SPIR-V to Metal
 /// and potentially compile to a `.metallib`.
-struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalDeviceProfile {
+struct MetalDeviceProfile {
 	enum class Platform : uint32_t {
 		macOS = 0,
 		iOS = 1,
