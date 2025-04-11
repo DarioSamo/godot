@@ -1089,7 +1089,14 @@ void RenderingDeviceDriverMetal::framebuffer_free(FramebufferID p_framebuffer) {
 
 #pragma mark - Shader
 
-// endregion
+void RenderingDeviceDriverMetal::shader_cache_free_entry(const SHA256Digest &key) {
+	if (ShaderCacheEntry **pentry = _shader_cache.getptr(key); pentry != nullptr) {
+		ShaderCacheEntry *entry = *pentry;
+		_shader_cache.erase(key);
+		entry->library = nil;
+		memdelete(entry);
+	}
+}
 
 static BindingInfo from_binding_info_data(const RenderingShaderContainerMetal::BindingInfoData &p_data) {
 	BindingInfo bi;
@@ -1134,7 +1141,7 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 			is_compute = true;
 		}
 
-		if (ShaderCacheEntry **p = MetalShaderCache::_shader_cache.getptr(shader_data.hash); p != nullptr) {
+		if (ShaderCacheEntry **p = _shader_cache.getptr(shader_data.hash); p != nullptr) {
 			libraries[shader.shader_stage] = (*p)->library;
 			continue;
 		}
@@ -1147,7 +1154,7 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 			decompressed_code = shader.code_compressed_bytes;
 		}
 
-		ShaderCacheEntry *cd = memnew(ShaderCacheEntry(shader_data.hash));
+		ShaderCacheEntry *cd = memnew(ShaderCacheEntry(*this, shader_data.hash));
 		cd->name = shader_name;
 		cd->stage = shader.shader_stage;
 
@@ -1172,10 +1179,10 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 												   device:device
 												   source:source
 												  options:options
-												 strategy:MetalShaderCache::_shader_load_strategy];
+												 strategy:_shader_load_strategy];
 		}
 
-		MetalShaderCache::_shader_cache[shader_data.hash] = cd;
+		_shader_cache[shader_data.hash] = cd;
 		libraries[shader.shader_stage] = library;
 	}
 
@@ -2761,6 +2768,15 @@ size_t RenderingDeviceDriverMetal::get_texel_buffer_alignment_for_format(MTLPixe
 RenderingDeviceDriverMetal::RenderingDeviceDriverMetal(RenderingContextDriverMetal *p_context_driver) :
 		context_driver(p_context_driver) {
 	DEV_ASSERT(p_context_driver != nullptr);
+
+#if TARGET_OS_OSX
+	if (String res = OS::get_singleton()->get_environment("GODOT_MTL_SHADER_LOAD_STRATEGY"); res == U"lazy") {
+		_shader_load_strategy = ShaderLoadStrategy::LAZY;
+	}
+#else
+	// Always use the lazy strategy on other OSs like iOS, tvOS, or visionOS.
+	_shader_load_strategy = ShaderLoadStrategy::LAZY;
+#endif
 }
 
 RenderingDeviceDriverMetal::~RenderingDeviceDriverMetal() {
@@ -2768,7 +2784,9 @@ RenderingDeviceDriverMetal::~RenderingDeviceDriverMetal() {
 		delete cb;
 	}
 
-	MetalShaderCache::clear_shader_cache();
+	for (KeyValue<SHA256Digest, ShaderCacheEntry *> &kv : _shader_cache) {
+		memdelete(kv.value);
+	}
 
 	if (shader_container_format != nullptr) {
 		memdelete(shader_container_format);

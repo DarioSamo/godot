@@ -605,25 +605,6 @@ enum class ShaderLoadStrategy {
 	DEFAULT = IMMEDIATE,
 };
 
-struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalShaderCache {
-	friend struct ShaderCacheEntry;
-	friend class RenderingShaderContainerMetal;
-
-	static ShaderLoadStrategy _shader_load_strategy;
-
-	/**
-	 * The shader cache is a map of hashes of the Metal source to shader cache entries.
-	 *
-	 * To prevent unbounded growth of the cache, cache entries are automatically freed when
-	 * there are no more references to the MDLibrary associated with the cache entry.
-	 */
-	static inline HashMap<SHA256Digest, ShaderCacheEntry *, HashableHasher<SHA256Digest>> _shader_cache;
-
-	static void shader_cache_free_entry(const SHA256Digest &key);
-	static void clear_shader_cache();
-	static void initialize();
-};
-
 /// A Metal shader library.
 @interface MDLibrary : NSObject {
 	ShaderCacheEntry *_entry;
@@ -659,20 +640,20 @@ struct HashMapComparatorDefault<SHA256Digest> {
 
 /// A cache entry for a Metal shader library.
 struct ShaderCacheEntry {
+	RenderingDeviceDriverMetal &owner;
 	/// A hash of the Metal shader source code.
 	SHA256Digest key;
 	CharString name;
 	RD::ShaderStage stage = RD::SHADER_STAGE_VERTEX;
 	/// This reference must be weak, to ensure that when the last strong reference to the library
 	/// is released, the cache entry is freed.
-	LocalVector<uint8_t> binary;
 	MDLibrary *__weak library = nil;
 
 	/// Notify the cache that this entry is no longer needed.
 	void notify_free() const;
 
-	ShaderCacheEntry(SHA256Digest p_key) :
-			key(p_key) {
+	ShaderCacheEntry(RenderingDeviceDriverMetal &p_owner, SHA256Digest p_key) :
+			owner(p_owner), key(p_key) {
 	}
 	~ShaderCacheEntry() = default;
 };

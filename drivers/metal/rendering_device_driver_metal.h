@@ -47,6 +47,8 @@
 class RenderingContextDriverMetal;
 
 class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMetal : public RenderingDeviceDriver {
+	friend struct ShaderCacheEntry;
+
 	template <typename T>
 	using Result = std::variant<T, Error>;
 
@@ -77,6 +79,19 @@ class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMet
 
 	Error _create_device();
 	void _check_capabilities();
+
+#pragma mark - Shader Cache
+
+	ShaderLoadStrategy _shader_load_strategy = ShaderLoadStrategy::DEFAULT;
+
+	/**
+	 * The shader cache is a map of hashes of the Metal source to shader cache entries.
+	 *
+	 * To prevent unbounded growth of the cache, cache entries are automatically freed when
+	 * there are no more references to the MDLibrary associated with the cache entry.
+	 */
+	HashMap<SHA256Digest, ShaderCacheEntry *, HashableHasher<SHA256Digest>> _shader_cache;
+	void shader_cache_free_entry(const SHA256Digest &key);
 
 public:
 	Error initialize(uint32_t p_device_index, uint32_t p_frame_count) override final;

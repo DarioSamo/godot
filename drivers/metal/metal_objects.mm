@@ -1932,7 +1932,7 @@ static const char *SHADER_STAGE_NAMES[] = {
 };
 
 void ShaderCacheEntry::notify_free() const {
-	MetalShaderCache::shader_cache_free_entry(key);
+	owner.shader_cache_free_entry(key);
 }
 
 @interface MDLibrary ()
@@ -2202,32 +2202,3 @@ void ShaderCacheEntry::notify_free() const {
 }
 
 @end
-
-#if TARGET_OS_OSX
-ShaderLoadStrategy MetalShaderCache::_shader_load_strategy = ShaderLoadStrategy::DEFAULT;
-#else
-ShaderLoadStrategy MetalShaderCache::_shader_load_strategy = ShaderLoadStrategy::LAZY;
-#endif
-
-void MetalShaderCache::initialize(void) {
-#if TARGET_OS_OSX
-	if (String res = OS::get_singleton()->get_environment("GODOT_MTL_SHADER_LOAD_STRATEGY"); res == U"lazy") {
-		MetalShaderCache::_shader_load_strategy = ShaderLoadStrategy::LAZY;
-	}
-#endif
-}
-
-void MetalShaderCache::shader_cache_free_entry(const SHA256Digest &key) {
-	if (ShaderCacheEntry **pentry = _shader_cache.getptr(key); pentry != nullptr) {
-		ShaderCacheEntry *entry = *pentry;
-		_shader_cache.erase(key);
-		entry->library = nil;
-		memdelete(entry);
-	}
-}
-
-void MetalShaderCache::clear_shader_cache() {
-	for (KeyValue<SHA256Digest, ShaderCacheEntry *> &kv : _shader_cache) {
-		memdelete(kv.value);
-	}
-}
