@@ -59,6 +59,8 @@ class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMet
 	uint32_t version_major = 2;
 	uint32_t version_minor = 0;
 	MetalDeviceProperties *device_properties = nullptr;
+	MetalDeviceProfile device_profile;
+	RenderingShaderContainerFormatMetal *shader_container_format = nullptr;
 	PixelFormats *pixel_formats = nullptr;
 	std::unique_ptr<MDResourceCache> resource_cache;
 
@@ -76,7 +78,7 @@ class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMet
 	String pipeline_cache_id;
 
 	Error _create_device();
-	Error _check_capabilities();
+	void _check_capabilities();
 
 public:
 	Error initialize(uint32_t p_device_index, uint32_t p_frame_count) override final;
@@ -226,9 +228,6 @@ private:
 	friend struct UniformData;
 	friend struct ShaderBinaryData;
 	friend struct PushConstantData;
-
-private:
-	RenderingShaderContainerFormatMetal shader_container_format;
 
 public:
 	virtual ShaderID shader_create_from_container(const Ref<RenderingShaderContainer> &p_shader_container, const Vector<ImmutableSampler> &p_immutable_samplers) override final;

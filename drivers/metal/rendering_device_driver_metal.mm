@@ -1091,9 +1091,229 @@ void RenderingDeviceDriverMetal::framebuffer_free(FramebufferID p_framebuffer) {
 
 // endregion
 
+static BindingInfo from_binding_info_data(const RenderingShaderContainerMetal::BindingInfoData &p_data) {
+	BindingInfo bi;
+	bi.dataType = static_cast<MTLDataType>(p_data.data_type);
+	bi.index = p_data.index;
+	bi.access = static_cast<MTLBindingAccess>(p_data.access);
+	bi.usage = static_cast<MTLResourceUsage>(p_data.usage);
+	bi.textureType = static_cast<MTLTextureType>(p_data.texture_type);
+	bi.imageFormat = p_data.image_format;
+	bi.arrayLength = p_data.array_length;
+	bi.isMultisampled = p_data.is_multisampled;
+	return bi;
+}
+
 RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref<RenderingShaderContainer> &p_shader_container, const Vector<ImmutableSampler> &p_immutable_samplers) {
 	Ref<RenderingShaderContainerMetal> shader_container = p_shader_container;
-	return shader_container->create_shader(p_immutable_samplers);
+	using RSCM = RenderingShaderContainerMetal;
+
+	CharString shader_name = shader_container->shader_name;
+	RSCM::HeaderData &mtl_reflection_data = shader_container->mtl_reflection_data;
+	Vector<RenderingShaderContainer::Shader> &shaders = shader_container->shaders;
+	Vector<RSCM::StageData> &mtl_shaders = shader_container->mtl_shaders;
+
+	// We need to regenerate the shader if the cache is moved to an incompatible device.
+	ERR_FAIL_COND_V_MSG(device_properties->features.argument_buffers_tier < MTLArgumentBuffersTier2 && mtl_reflection_data.uses_argument_buffers(),
+			RDD::ShaderID(),
+			"Shader was generated with argument buffers, but device has limited support");
+
+	MTLCompileOptions *options = [MTLCompileOptions new];
+	uint32_t major = mtl_reflection_data.msl_version / 10000;
+	uint32_t minor = (mtl_reflection_data.msl_version / 100) % 100;
+	options.languageVersion = MTLLanguageVersion((major << 0x10) + minor);
+	HashMap<RD::ShaderStage, MDLibrary *> libraries;
+
+	bool is_compute = false;
+	Vector<uint8_t> decompressed_code;
+	for (uint32_t shader_index = 0; shader_index < shaders.size(); shader_index++) {
+		const RenderingShaderContainer::Shader &shader = shaders[shader_index];
+		const RSCM::StageData &shader_data = mtl_shaders[shader_index];
+
+		if (shader.shader_stage == RD::ShaderStage::SHADER_STAGE_COMPUTE) {
+			is_compute = true;
+		}
+
+		if (ShaderCacheEntry **p = MetalShaderCache::_shader_cache.getptr(shader_data.hash); p != nullptr) {
+			libraries[shader.shader_stage] = (*p)->library;
+			continue;
+		}
+
+		if (shader.code_decompressed_size > 0) {
+			decompressed_code.resize(shader.code_decompressed_size);
+			bool decompressed = shader_container->decompress_code(shader.code_compressed_bytes.ptr(), shader.code_compressed_bytes.size(), shader.code_compression_flags, decompressed_code.ptrw(), decompressed_code.size());
+			ERR_FAIL_COND_V_MSG(!decompressed, RDD::ShaderID(), vformat("Failed to decompress code on shader stage %s.", String(RDD::SHADER_STAGE_NAMES[shader.shader_stage])));
+		} else {
+			decompressed_code = shader.code_compressed_bytes;
+		}
+
+		ShaderCacheEntry *cd = memnew(ShaderCacheEntry(shader_data.hash));
+		cd->name = shader_name;
+		cd->stage = shader.shader_stage;
+
+		NSString *source = [[NSString alloc] initWithBytes:(void *)decompressed_code.ptr()
+													length:shader_data.source_size
+												  encoding:NSUTF8StringEncoding];
+
+		MDLibrary *library = nil;
+		if (shader_data.library_size > 0) {
+			dispatch_data_t binary = dispatch_data_create(decompressed_code.ptr() + shader_data.source_size, shader_data.library_size, dispatch_get_main_queue(), ^{
+																																	   });
+			library = [MDLibrary newLibraryWithCacheEntry:cd
+												   device:device
+#if DEV_ENABLED
+												   source:source
+#endif
+													 data:binary];
+		} else {
+			options.preserveInvariance = shader_data.is_position_invariant;
+			options.fastMathEnabled = YES;
+			library = [MDLibrary newLibraryWithCacheEntry:cd
+												   device:device
+												   source:source
+												  options:options
+												 strategy:MetalShaderCache::_shader_load_strategy];
+		}
+
+		MetalShaderCache::_shader_cache[shader_data.hash] = cd;
+		libraries[shader.shader_stage] = library;
+	}
+
+	ShaderReflection refl = shader_container->get_shader_reflection();
+	RSCM::MetalShaderReflection mtl_refl = shader_container->get_metal_shader_reflection();
+
+	Vector<UniformSet> uniform_sets;
+	uint32_t uniform_sets_count = mtl_refl.uniform_sets.size();
+	uniform_sets.resize(uniform_sets_count);
+
+	// Create sets.
+	for (uint32_t i = 0; i < uniform_sets_count; i++) {
+		UniformSet &set = uniform_sets.ptrw()[i];
+		const Vector<ShaderUniform> &refl_set = refl.uniform_sets.ptr()[i];
+		const Vector<RSCM::UniformData> &mtl_set = mtl_refl.uniform_sets.ptr()[i];
+		uint32_t set_size = mtl_set.size();
+		set.uniforms.resize(set_size);
+
+		LocalVector<UniformInfo>::Iterator iter = set.uniforms.begin();
+		for (uint32_t j = 0; j < set_size; j++) {
+			const ShaderUniform &uniform = refl_set.ptr()[j];
+			const RSCM::UniformData &bind = mtl_set.ptr()[j];
+
+			UniformInfo &ui = *iter;
+			++iter;
+			ui.binding = uniform.binding;
+			ui.active_stages = static_cast<ShaderStageUsage>(bind.active_stages);
+
+			for (const RSCM::BindingInfoData &info : bind.bindings) {
+				if (info.shader_stage == UINT32_MAX) {
+					continue;
+				}
+				BindingInfo bi = from_binding_info_data(info);
+				ui.bindings.insert((RDC::ShaderStage)info.shader_stage, bi);
+			}
+			for (const RSCM::BindingInfoData &info : bind.bindings_secondary) {
+				if (info.shader_stage == UINT32_MAX) {
+					continue;
+				}
+				BindingInfo bi = from_binding_info_data(info);
+				ui.bindings_secondary.insert((RDC::ShaderStage)info.shader_stage, bi);
+			}
+		}
+	}
+
+	for (uint32_t i = 0; i < uniform_sets_count; i++) {
+		UniformSet &set = uniform_sets.write[i];
+
+		// Make encoders.
+		for (RenderingShaderContainer::Shader const &shader : shaders) {
+			RD::ShaderStage stage = shader.shader_stage;
+			NSMutableArray<MTLArgumentDescriptor *> *descriptors = [NSMutableArray new];
+
+			for (UniformInfo const &uniform : set.uniforms) {
+				BindingInfo const *binding_info = uniform.bindings.getptr(stage);
+				if (binding_info == nullptr) {
+					continue;
+				}
+
+				[descriptors addObject:binding_info->new_argument_descriptor()];
+				BindingInfo const *secondary_binding_info = uniform.bindings_secondary.getptr(stage);
+				if (secondary_binding_info != nullptr) {
+					[descriptors addObject:secondary_binding_info->new_argument_descriptor()];
+				}
+			}
+
+			if (descriptors.count == 0) {
+				// No bindings.
+				continue;
+			}
+			// Sort by index.
+			[descriptors sortUsingComparator:^NSComparisonResult(MTLArgumentDescriptor *a, MTLArgumentDescriptor *b) {
+				if (a.index < b.index) {
+					return NSOrderedAscending;
+				} else if (a.index > b.index) {
+					return NSOrderedDescending;
+				} else {
+					return NSOrderedSame;
+				}
+			}];
+
+			id<MTLArgumentEncoder> enc = [device newArgumentEncoderWithArguments:descriptors];
+			set.encoders[stage] = enc;
+			set.offsets[stage] = set.buffer_size;
+			set.buffer_size += enc.encodedLength;
+		}
+	}
+
+	MDShader *shader = nullptr;
+	if (is_compute) {
+		const RSCM::StageData &stage_data = mtl_shaders[0];
+
+		MDComputeShader *cs = new MDComputeShader(
+				shader_name,
+				uniform_sets,
+				mtl_reflection_data.uses_argument_buffers(),
+				libraries[RD::ShaderStage::SHADER_STAGE_COMPUTE]);
+
+		if (stage_data.push_constant_binding != UINT32_MAX) {
+			cs->push_constants.size = refl.push_constant_size;
+			cs->push_constants.binding = stage_data.push_constant_binding;
+		}
+
+		cs->local = MTLSizeMake(refl.compute_local_size[0], refl.compute_local_size[1], refl.compute_local_size[2]);
+		shader = cs;
+	} else {
+		MDRenderShader *rs = new MDRenderShader(
+				shader_name,
+				uniform_sets,
+				mtl_reflection_data.needs_view_mask_buffer(),
+				mtl_reflection_data.uses_argument_buffers(),
+				libraries[RD::ShaderStage::SHADER_STAGE_VERTEX],
+				libraries[RD::ShaderStage::SHADER_STAGE_FRAGMENT]);
+
+		for (uint32_t j = 0; j < shaders.size(); j++) {
+			const RSCM::StageData &stage_data = mtl_shaders[j];
+			switch (shaders[j].shader_stage) {
+				case RD::ShaderStage::SHADER_STAGE_VERTEX: {
+					if (stage_data.push_constant_binding != UINT32_MAX) {
+						rs->push_constants.vert.size = refl.push_constant_size;
+						rs->push_constants.vert.binding = stage_data.push_constant_binding;
+					}
+				} break;
+				case RD::ShaderStage::SHADER_STAGE_FRAGMENT: {
+					if (stage_data.push_constant_binding != UINT32_MAX) {
+						rs->push_constants.frag.size = refl.push_constant_size;
+						rs->push_constants.frag.binding = stage_data.push_constant_binding;
+					}
+				} break;
+				default: {
+					ERR_FAIL_V_MSG(RDD::ShaderID(), "Invalid shader stage");
+				} break;
+			}
+		}
+		shader = rs;
+	}
+
+	return RDD::ShaderID(shader);
 }
 
 void RenderingDeviceDriverMetal::shader_free(ShaderID p_shader) {
@@ -2549,6 +2769,18 @@ RenderingDeviceDriverMetal::~RenderingDeviceDriverMetal() {
 	}
 
 	MetalShaderCache::clear_shader_cache();
+
+	if (shader_container_format != nullptr) {
+		memdelete(shader_container_format);
+	}
+
+	if (pixel_formats != nullptr) {
+		memdelete(pixel_formats);
+	}
+
+	if (device_properties != nullptr) {
+		memdelete(device_properties);
+	}
 }
 
 #pragma mark - Initialization
@@ -2568,16 +2800,10 @@ Error RenderingDeviceDriverMetal::_create_device() {
 	return OK;
 }
 
-Error RenderingDeviceDriverMetal::_check_capabilities() {
-	MTLCompileOptions *options = [MTLCompileOptions new];
-	version_major = (options.languageVersion >> 0x10) & 0xff;
-	version_minor = (options.languageVersion >> 0x00) & 0xff;
-
+void RenderingDeviceDriverMetal::_check_capabilities() {
 	capabilities.device_family = DEVICE_METAL;
-	capabilities.version_major = version_major;
-	capabilities.version_minor = version_minor;
-
-	return OK;
+	capabilities.version_major = device_properties->features.mslVersionMajor;
+	capabilities.version_minor = device_properties->features.mslVersionMinor;
 }
 
 Error RenderingDeviceDriverMetal::initialize(uint32_t p_device_index, uint32_t p_frame_count) {
@@ -2585,13 +2811,15 @@ Error RenderingDeviceDriverMetal::initialize(uint32_t p_device_index, uint32_t p
 	Error err = _create_device();
 	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 
-	err = _check_capabilities();
-	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
+	device_properties = memnew(MetalDeviceProperties(device));
+	device_profile = MetalDeviceProfile(device_properties);
+	shader_container_format = memnew(RenderingShaderContainerFormatMetal(&device_profile));
+
+	_check_capabilities();
 
 	// Set the pipeline cache ID based on the Metal version.
 	pipeline_cache_id = "metal-driver-" + get_api_version();
 
-	device_properties = memnew(MetalDeviceProperties(device));
 	pixel_formats = memnew(PixelFormats(device, device_properties->features));
 	if (device_properties->features.layeredRendering) {
 		multiview_capabilities.is_supported = true;
@@ -2627,5 +2855,5 @@ Error RenderingDeviceDriverMetal::initialize(uint32_t p_device_index, uint32_t p
 }
 
 const RenderingShaderContainerFormat &RenderingDeviceDriverMetal::get_shader_container_format() const {
-	return shader_container_format;
+	return *shader_container_format;
 }
