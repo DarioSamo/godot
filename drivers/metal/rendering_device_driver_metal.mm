@@ -2824,7 +2824,8 @@ void RenderingDeviceDriverMetal::_check_capabilities() {
 	capabilities.version_minor = device_properties->features.mslVersionMinor;
 }
 
-MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *p_device_properties) {
+API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0))
+static MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *p_device_properties) {
 	using DP = MetalDeviceProfile;
 	MetalDeviceProfile res;
 #if TARGET_OS_OSX
@@ -2846,6 +2847,15 @@ MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *p_devic
 #endif
 	// highestFamily will only be set to an Apple GPU family
 	switch (p_device_properties->features.highestFamily) {
+		case MTLGPUFamilyApple1:
+			res.gpu = DP::GPU::Apple1;
+			break;
+		case MTLGPUFamilyApple2:
+			res.gpu = DP::GPU::Apple2;
+			break;
+		case MTLGPUFamilyApple3:
+			res.gpu = DP::GPU::Apple3;
+			break;
 		case MTLGPUFamilyApple4:
 			res.gpu = DP::GPU::Apple4;
 			break;
@@ -2864,10 +2874,8 @@ MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *p_devic
 		case MTLGPUFamilyApple9:
 			res.gpu = DP::GPU::Apple9;
 			break;
-		case MTLGPUFamilyApple1:
-		case MTLGPUFamilyApple2:
-		case MTLGPUFamilyApple3:
 		default: {
+			// Programming error if the default case is hit.
 			CRASH_NOW_MSG("Unsupported GPU family");
 		} break;
 	}

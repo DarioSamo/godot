@@ -52,9 +52,10 @@ struct MetalDeviceProfile {
 	};
 
 	/// @brief The GPU family.
-	///
-	/// `Apple4` GPUs are the minimum supported by Godot.
 	enum class GPU : uint32_t {
+		Apple1,
+		Apple2,
+		Apple3,
 		Apple4,
 		Apple5,
 		Apple6,
