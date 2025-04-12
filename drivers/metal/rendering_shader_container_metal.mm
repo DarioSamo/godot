@@ -65,6 +65,9 @@ const MetalDeviceProfile *MetalDeviceProfile::get_profile(MetalDeviceProfile::Pl
 		res.features.simdPermute = true;
 	} else if (p_platform == Platform::iOS) {
 		switch (p_gpu) {
+			case GPU::Apple1:
+			case GPU::Apple2:
+			case GPU::Apple3:
 			case GPU::Apple4:
 			case GPU::Apple5: {
 				res.features.simdPermute = false;
