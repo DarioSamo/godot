@@ -1977,8 +1977,6 @@ void ShaderCacheEntry::notify_free() const {
 @interface MDBinaryLibrary : MDLibrary {
 	id<MTLLibrary> _library;
 	NSError *_error;
-	bool _loaded;
-	id<MTLDevice> _device;
 }
 - (instancetype)initWithCacheEntry:(ShaderCacheEntry *)entry
 							device:(id<MTLDevice>)device

@@ -31,13 +31,9 @@
 #include "rendering_shader_container_metal.h"
 #include "servers/rendering/rendering_device.h"
 
-#import "metal_objects.h"
-
 #import "core/io/marshalls.h"
 
-#import <Metal/MTLTexture.h>
 #import <Metal/Metal.h>
-#import <os/log.h>
 #import <spirv.hpp>
 #import <spirv_msl.hpp>
 #import <spirv_parser.hpp>
@@ -177,6 +173,9 @@ Error RenderingShaderContainerMetal::compile_metal_source(const char *p_source, 
 
 	return OK;
 }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
 
 bool RenderingShaderContainerMetal::_set_code_from_spirv(const Vector<RenderingDeviceCommons::ShaderStageSPIRVData> &p_spirv) {
 	using namespace spirv_cross;
@@ -398,7 +397,7 @@ bool RenderingShaderContainerMetal::_set_code_from_spirv(const Vector<RenderingD
 							}
 						} break;
 						case spv::DimSubpassData: {
-							DISPATCH_FALLTHROUGH;
+							[[fallthrough]];
 						}
 						case spv::Dim2D: {
 							if (image.arrayed && image.ms) {
@@ -454,7 +453,7 @@ bool RenderingShaderContainerMetal::_set_code_from_spirv(const Vector<RenderingD
 							case spv::AccessQualifierReadOnly:
 								break;
 							case spv::AccessQualifierMax:
-								DISPATCH_FALLTHROUGH;
+								[[fallthrough]];
 							default:
 								if (!compiler.has_decoration(res.id, spv::DecorationNonWritable)) {
 									if (compiler.has_decoration(res.id, spv::DecorationNonReadable)) {
@@ -594,6 +593,8 @@ bool RenderingShaderContainerMetal::_set_code_from_spirv(const Vector<RenderingD
 
 	return true;
 }
+
+#pragma clang diagnostic pop
 
 uint32_t RenderingShaderContainerMetal::_to_bytes_reflection_extra_data(uint8_t *p_bytes) const {
 	if (p_bytes != nullptr) {

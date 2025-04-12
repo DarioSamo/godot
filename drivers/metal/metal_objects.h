@@ -83,9 +83,6 @@ MTL_CLASS(Texture)
 
 } //namespace MTL
 
-/// Metal buffer index for the view mask when rendering multi-view.
-const uint32_t VIEW_MASK_BUFFER_INDEX = 24;
-
 enum ShaderStageUsage : uint32_t {
 	None = 0,
 	Vertex = RDD::SHADER_STAGE_VERTEX_BIT,

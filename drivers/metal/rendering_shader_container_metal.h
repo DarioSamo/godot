@@ -36,6 +36,8 @@
 #import "servers/rendering/rendering_shader_container.h"
 
 constexpr uint32_t R32UI_ALIGNMENT_CONSTANT_ID = 65535;
+/// Metal buffer index for the view mask when rendering multi-view.
+const uint32_t VIEW_MASK_BUFFER_INDEX = 24;
 
 class RenderingShaderContainerFormatMetal;
 
