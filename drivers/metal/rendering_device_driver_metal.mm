@@ -1098,6 +1098,7 @@ void RenderingDeviceDriverMetal::shader_cache_free_entry(const SHA256Digest &key
 	}
 }
 
+API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0))
 static BindingInfo from_binding_info_data(const RenderingShaderContainerMetal::BindingInfoData &p_data) {
 	BindingInfo bi;
 	bi.dataType = static_cast<MTLDataType>(p_data.data_type);
