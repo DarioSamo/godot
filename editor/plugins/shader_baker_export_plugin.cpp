@@ -103,7 +103,7 @@ bool ShaderBakerExportPlugin::_begin_customize_resources(const Ref<EditorExportP
 
 	shader_cache_platform_name = p_platform->get_os_name();
 
-	BitField<RenderingShaderLibrary::FeatureBits> renderer_features;
+	BitField<RenderingShaderLibrary::FeatureBits> renderer_features = {};
 	bool xr_enabled = GLOBAL_GET("xr/shaders/enabled");
 	renderer_features.set_flag(RenderingShaderLibrary::FEATURE_ADVANCED_BIT);
 	if (xr_enabled) {

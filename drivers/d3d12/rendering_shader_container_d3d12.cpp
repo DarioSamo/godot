@@ -790,7 +790,7 @@ bool RenderingShaderContainerD3D12::_set_code_from_spirv(const Vector<RenderingD
 	// Translate SPIR-V shaders to DXIL, and collect shader info from the new representation.
 	HashMap<RenderingDeviceCommons::ShaderStage, Vector<uint8_t>> dxil_blobs;
 	Vector<RenderingDeviceCommons::ShaderStage> stages;
-	BitField<RenderingDeviceCommons::ShaderStage> stages_processed;
+	BitField<RenderingDeviceCommons::ShaderStage> stages_processed = {};
 	if (!_convert_spirv_to_dxil(p_spirv, dxil_blobs, stages, stages_processed)) {
 		return false;
 	}
