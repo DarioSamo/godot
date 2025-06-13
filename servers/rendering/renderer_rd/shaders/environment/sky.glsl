@@ -29,6 +29,8 @@ void main() {
 
 #VERSION_DEFINES
 
+#include "../oct_inc.glsl"
+
 #ifdef USE_MULTIVIEW
 #extension GL_EXT_multiview : enable
 #define ViewIndex gl_ViewIndex
@@ -100,10 +102,10 @@ layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
 /* clang-format on */
 #endif
 
-layout(set = 2, binding = 0) uniform textureCube radiance;
+layout(set = 2, binding = 0) uniform texture2D radiance;
 #ifdef USE_CUBEMAP_PASS
-layout(set = 2, binding = 1) uniform textureCube half_res;
-layout(set = 2, binding = 2) uniform textureCube quarter_res;
+layout(set = 2, binding = 1) uniform texture2D half_res;
+layout(set = 2, binding = 2) uniform texture2D quarter_res;
 #elif defined(USE_MULTIVIEW)
 layout(set = 2, binding = 1) uniform texture2DArray half_res;
 layout(set = 2, binding = 2) uniform texture2DArray quarter_res;
@@ -200,6 +202,9 @@ float atan2_approx(float y, float x) {
 
 void main() {
 	vec3 cube_normal;
+#ifdef USE_CUBEMAP_PASS
+	cube_normal = oct_to_vec3(uv_interp);
+#else
 #ifdef USE_MULTIVIEW
 	// In multiview our projection matrices will contain positional and rotational offsets that we need to properly unproject.
 	vec4 unproject = vec4(uv_interp.x, uv_interp.y, 0.0, 1.0); // unproject at the far plane
@@ -215,6 +220,7 @@ void main() {
 #endif
 	cube_normal = mat3(params.orientation) * cube_normal;
 	cube_normal = normalize(cube_normal);
+#endif
 
 	vec2 uv = uv_interp * 0.5 + 0.5;
 
@@ -235,10 +241,10 @@ void main() {
 #ifdef USE_CUBEMAP_PASS
 
 #ifdef USES_HALF_RES_COLOR
-	half_res_color = texture(samplerCube(half_res, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), cube_normal) / params.luminance_multiplier;
+	half_res_color = texture(sampler2D(half_res, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3_to_oct(cube_normal)) / params.luminance_multiplier;
 #endif
 #ifdef USES_QUARTER_RES_COLOR
-	quarter_res_color = texture(samplerCube(quarter_res, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), cube_normal) / params.luminance_multiplier;
+	quarter_res_color = texture(sampler2D(quarter_res, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3_to_oct(cube_normal)) / params.luminance_multiplier;
 #endif
 
 #else

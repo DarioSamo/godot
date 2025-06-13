@@ -74,9 +74,9 @@ private:
 		SKY_TEXTURE_SET_BACKGROUND,
 		SKY_TEXTURE_SET_HALF_RES,
 		SKY_TEXTURE_SET_QUARTER_RES,
-		SKY_TEXTURE_SET_CUBEMAP,
-		SKY_TEXTURE_SET_CUBEMAP_HALF_RES,
-		SKY_TEXTURE_SET_CUBEMAP_QUARTER_RES,
+		SKY_TEXTURE_SET_OCTMAP,
+		SKY_TEXTURE_SET_OCTMAP_HALF_RES,
+		SKY_TEXTURE_SET_OCTMAP_QUARTER_RES,
 		SKY_TEXTURE_SET_MAX
 	};
 
@@ -84,9 +84,9 @@ private:
 		SKY_VERSION_BACKGROUND,
 		SKY_VERSION_HALF_RES,
 		SKY_VERSION_QUARTER_RES,
-		SKY_VERSION_CUBEMAP,
-		SKY_VERSION_CUBEMAP_HALF_RES,
-		SKY_VERSION_CUBEMAP_QUARTER_RES,
+		SKY_VERSION_OCTMAP,
+		SKY_VERSION_OCTMAP_HALF_RES,
+		SKY_VERSION_OCTMAP_QUARTER_RES,
 
 		SKY_VERSION_BACKGROUND_MULTIVIEW,
 		SKY_VERSION_HALF_RES_MULTIVIEW,
@@ -186,12 +186,11 @@ public:
 	struct ReflectionData {
 		struct Layer {
 			struct Mipmap {
-				RID framebuffers[6];
-				RID views[6];
+				RID framebuffer;
+				RID view;
 				Size2i size;
 			};
-			Vector<Mipmap> mipmaps; //per-face view
-			Vector<RID> views; // per-cubemap view
+			Vector<Mipmap> mipmaps;
 		};
 
 		struct DownsampleLayer {
@@ -200,14 +199,14 @@ public:
 				Size2i size;
 
 				// for mobile only
-				RID views[6];
-				RID framebuffers[6];
+				RID octmap_view;
+				RID framebuffer;
 			};
 			Vector<Mipmap> mipmaps;
 		};
 
-		RID radiance_base_cubemap; //cubemap for first layer, first cubemap
-		RID downsampled_radiance_cubemap;
+		RID radiance_base_octmap;
+		RID downsampled_radiance_octmap;
 		DownsampleLayer downsampled_layer;
 		RID coefficient_buffer;
 
@@ -216,9 +215,9 @@ public:
 		Vector<Layer> layers;
 
 		void clear_reflection_data();
-		void update_reflection_data(int p_size, int p_mipmaps, bool p_use_array, RID p_base_cube, int p_base_layer, bool p_low_quality, int p_roughness_layers, RD::DataFormat p_texture_format);
+		void update_reflection_data(int p_size, int p_mipmaps, bool p_use_array, RID p_base_oct, int p_base_layer, bool p_low_quality, int p_roughness_layers, RD::DataFormat p_texture_format);
 		void create_reflection_fast_filter(bool p_use_arrays);
-		void create_reflection_importance_sample(bool p_use_arrays, int p_cube_side, int p_base_layer, uint32_t p_sky_ggx_samples_quality);
+		void create_reflection_importance_sample(bool p_use_arrays, int p_base_layer, uint32_t p_sky_ggx_samples_quality);
 		void update_reflection_mipmaps(int p_start, int p_end);
 	};
 
@@ -245,6 +244,9 @@ public:
 	};
 
 	struct Sky {
+		static inline const int REAL_TIME_SIZE = 512;
+		static inline const int REAL_TIME_ROUGHNESS_LAYERS = 8;
+
 		RID radiance;
 		RID quarter_res_pass;
 		RID quarter_res_framebuffer;
@@ -255,7 +257,7 @@ public:
 		RID material;
 		RID uniform_buffer;
 
-		int radiance_size = 256;
+		int radiance_size = REAL_TIME_SIZE;
 
 		RS::SkyMode mode = RS::SKY_MODE_AUTOMATIC;
 
@@ -265,7 +267,7 @@ public:
 		Sky *dirty_list = nullptr;
 		float baked_exposure = 1.0;
 
-		//State to track when radiance cubemap needs updating
+		//State to track when radiance octmap needs updating
 		SkyMaterialData *prev_material = nullptr;
 		Vector3 prev_position;
 		float prev_time;
@@ -280,9 +282,9 @@ public:
 	};
 
 	uint32_t sky_ggx_samples_quality;
-	bool sky_use_cubemap_array;
+	bool sky_use_octmap_array;
 #if defined(MACOS_ENABLED) && defined(__x86_64__)
-	void check_cubemap_array();
+	void check_octmap_array();
 #endif
 	Sky *dirty_sky_list = nullptr;
 	mutable RID_Owner<Sky, true> sky_owner;

@@ -2,6 +2,7 @@
 #define MAX_VIEWS 2
 
 #include "../decal_data_inc.glsl"
+#include "../oct_inc.glsl"
 #include "../scene_data_inc.glsl"
 
 #if !defined(MODE_RENDER_DEPTH) || defined(MODE_RENDER_MATERIAL) || defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(BENT_NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED)
@@ -326,13 +327,13 @@ layout(set = 1, binding = 1, std430) buffer restrict readonly InstanceDataBuffer
 }
 instances;
 
-#ifdef USE_RADIANCE_CUBEMAP_ARRAY
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
 
-layout(set = 1, binding = 2) uniform textureCubeArray radiance_cubemap;
+layout(set = 1, binding = 2) uniform texture2DArray radiance_octmap;
 
 #else
 
-layout(set = 1, binding = 2) uniform textureCube radiance_cubemap;
+layout(set = 1, binding = 2) uniform texture2D radiance_octmap;
 
 #endif
 

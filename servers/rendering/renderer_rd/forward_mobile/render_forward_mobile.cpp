@@ -485,7 +485,7 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 		if (p_radiance_texture.is_valid()) {
 			radiance_texture = p_radiance_texture;
 		} else {
-			radiance_texture = texture_storage->texture_rd_get_default(is_using_radiance_cubemap_array() ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_BLACK);
+			radiance_texture = texture_storage->texture_rd_get_default(is_using_radiance_octmap_array() ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_BLACK);
 		}
 		RD::Uniform u;
 		u.binding = 2;
@@ -1195,7 +1195,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 				RID texture = RendererRD::TextureStorage::get_singleton()->render_target_get_rd_texture(rb->get_render_target());
 				bool convert_to_linear = !hdr_render_target;
 
-				copy_effects->copy_to_drawlist(draw_list, fb_format, texture, convert_to_linear);
+				copy_effects->copy_to_drawlist(draw_list, fb_format, texture, convert_to_linear, 2.0f);
 			}
 		}
 
@@ -3326,8 +3326,8 @@ RenderForwardMobile::RenderForwardMobile() {
 	String defines;
 
 	defines += "\n#define MAX_ROUGHNESS_LOD " + itos(get_roughness_layers() - 1) + ".0\n";
-	if (is_using_radiance_cubemap_array()) {
-		defines += "\n#define USE_RADIANCE_CUBEMAP_ARRAY \n";
+	if (is_using_radiance_octmap_array()) {
+		defines += "\n#define USE_RADIANCE_OCTMAP_ARRAY \n";
 	}
 	// defines += "\n#define SDFGI_OCT_SIZE " + itos(gi.sdfgi_get_lightprobe_octahedron_size()) + "\n";
 	defines += "\n#define MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS " + itos(MAX_DIRECTIONAL_LIGHTS) + "\n";

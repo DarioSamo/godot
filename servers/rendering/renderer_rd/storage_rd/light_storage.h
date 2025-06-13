@@ -276,7 +276,6 @@ private:
 		bool dirty = true;
 		bool rendering = false;
 		int processing_layer = 1;
-		int processing_side = 0;
 
 		uint64_t last_pass = 0;
 		uint32_t cull_mask = 0;

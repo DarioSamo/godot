@@ -1,32 +1,45 @@
-#[compute]
+/* clang-format off */
+#[vertex]
 
 #version 450
 
 #VERSION_DEFINES
 
-#define GROUP_SIZE 8
+#include "octmap_roughness_inc.glsl"
 
-layout(local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1) in;
-
-layout(set = 0, binding = 0) uniform samplerCube source_cube;
-
-layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly imageCube dest_cubemap;
-
-#include "cubemap_roughness_inc.glsl"
+layout(location = 0) out vec2 uv_interp;
+/* clang-format on */
 
 void main() {
-	uvec3 id = gl_GlobalInvocationID;
-	id.z += params.face_id;
+	vec2 base_arr[3] = vec2[](vec2(-1.0, -1.0), vec2(-1.0, 3.0), vec2(3.0, -1.0));
+	gl_Position = vec4(base_arr[gl_VertexIndex], 0.0, 1.0);
+	uv_interp = clamp(gl_Position.xy, vec2(0.0, 0.0), vec2(1.0, 1.0)) * 2.0; // saturate(x) * 2.0
+}
 
-	vec2 uv = ((vec2(id.xy) * 2.0 + 1.0) / (params.face_size) - 1.0);
-	vec3 N = texelCoordToVec(uv, id.z);
+/* clang-format off */
+#[fragment]
 
+#version 450
+
+#VERSION_DEFINES
+
+#include "../oct_inc.glsl"
+#include "octmap_roughness_inc.glsl"
+
+layout(location = 0) in vec2 uv_interp;
+
+layout(set = 0, binding = 0) uniform sampler2D source_oct;
+
+layout(location = 0) out vec4 frag_color;
+/* clang-format on */
+
+void main() {
 	if (params.use_direct_write) {
-		imageStore(dest_cubemap, ivec3(id), vec4(texture(source_cube, N).rgb, 1.0));
+		frag_color = vec4(texture(source_oct, uv_interp).rgb, 1.0);
 	} else {
+		vec3 N = oct_to_vec3(uv_interp * 2.0 - 1.0);
 		vec4 sum = vec4(0.0, 0.0, 0.0, 0.0);
-
-		float solid_angle_texel = 4.0 * M_PI / (6.0 * params.face_size * params.face_size);
+		float solid_angle_texel = 4.0 * M_PI / (6.0 * params.size * params.size);
 		float roughness2 = params.roughness * params.roughness;
 		float roughness4 = roughness2 * roughness2;
 		vec3 UpVector = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
@@ -52,12 +65,12 @@ void main() {
 
 				float mipLevel = params.roughness == 0.0 ? 0.0 : 0.5 * log2(solid_angle_sample / solid_angle_texel);
 
-				sum.rgb += textureLod(source_cube, L, mipLevel).rgb * ndotl;
+				vec2 sample_uv = vec3_to_oct(L);
+				sum.rgb += textureLod(source_oct, sample_uv, mipLevel).rgb * ndotl;
 				sum.a += ndotl;
 			}
 		}
-		sum /= sum.a;
 
-		imageStore(dest_cubemap, ivec3(id), vec4(sum.rgb, 1.0));
+		frag_color = vec4(sum.rgb / sum.a, 1.0);
 	}
 }

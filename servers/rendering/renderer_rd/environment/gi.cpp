@@ -3495,8 +3495,8 @@ void GI::init(SkyRD *p_sky) {
 		//calculate tables
 		String defines = "\n#define OCT_SIZE " + itos(SDFGI::LIGHTPROBE_OCT_SIZE) + "\n";
 		defines += "\n#define SH_SIZE " + itos(SDFGI::SH_SIZE) + "\n";
-		if (p_sky->sky_use_cubemap_array) {
-			defines += "\n#define USE_CUBEMAP_ARRAY\n";
+		if (p_sky->sky_use_octmap_array) {
+			defines += "\n#define USE_OCTMAP_ARRAY\n";
 		}
 
 		Vector<String> integrate_modes;
@@ -3518,10 +3518,10 @@ void GI::init(SkyRD *p_sky) {
 				RD::Uniform u;
 				u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 				u.binding = 0;
-				if (p_sky->sky_use_cubemap_array) {
-					u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_WHITE));
+				if (p_sky->sky_use_octmap_array) {
+					u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE));
 				} else {
-					u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_WHITE));
+					u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
 				}
 				uniforms.push_back(u);
 			}

@@ -1448,7 +1448,6 @@ void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
 		rpi->rendering = false;
 		rpi->dirty = true;
 		rpi->processing_layer = 1;
-		rpi->processing_side = 0;
 	}
 
 	rpi->atlas_index = -1;
@@ -1542,7 +1541,8 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		for (int i = 0; i < atlas->count; i++) {
 			atlas->reflections.write[i].data.update_reflection_data(atlas->size, mipmaps, false, atlas->reflection, i * 6, LightStorage::get_singleton()->reflection_probe_get_update_mode(rpi->probe) == RS::REFLECTION_PROBE_UPDATE_ALWAYS, RendererSceneRenderRD::get_singleton()->get_sky()->roughness_layers, RendererSceneRenderRD::get_singleton()->_render_buffers_get_color_format());
 			for (int j = 0; j < 6; j++) {
-				atlas->reflections.write[i].fbs[j] = RendererSceneRenderRD::get_singleton()->reflection_probe_create_framebuffer(atlas->reflections.write[i].data.layers[0].mipmaps[0].views[j], atlas->depth_buffer);
+				// TODO: Should reflection probes be turned into octahedral maps as well? This was modified to share only one view incorrectly on purpose.
+				atlas->reflections.write[i].fbs[j] = RendererSceneRenderRD::get_singleton()->reflection_probe_create_framebuffer(atlas->reflections.write[i].data.layers[0].mipmaps[0].view, atlas->depth_buffer);
 			}
 		}
 
@@ -1583,7 +1583,6 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 	rpi->rendering = true;
 	rpi->dirty = false;
 	rpi->processing_layer = 1;
-	rpi->processing_side = 0;
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -1613,35 +1612,17 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 		// Using real time reflections, all roughness is done in one step
 		atlas->reflections.write[rpi->atlas_index].data.create_reflection_fast_filter(false);
 		rpi->rendering = false;
-		rpi->processing_side = 0;
 		rpi->processing_layer = 1;
 		return true;
 	}
 
-	if (rpi->processing_layer > 1) {
-		atlas->reflections.write[rpi->atlas_index].data.create_reflection_importance_sample(false, 10, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-		rpi->processing_layer++;
-		if (rpi->processing_layer == atlas->reflections[rpi->atlas_index].data.layers[0].mipmaps.size()) {
-			rpi->rendering = false;
-			rpi->processing_side = 0;
-			rpi->processing_layer = 1;
-			return true;
-		}
-		return false;
+	atlas->reflections.write[rpi->atlas_index].data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
 
-	} else {
-		atlas->reflections.write[rpi->atlas_index].data.create_reflection_importance_sample(false, rpi->processing_side, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-	}
-
-	rpi->processing_side++;
-	if (rpi->processing_side == 6) {
-		rpi->processing_side = 0;
-		rpi->processing_layer++;
-		if (rpi->processing_layer == atlas->reflections[rpi->atlas_index].data.layers[0].mipmaps.size()) {
-			rpi->rendering = false;
-			rpi->processing_layer = 1;
-			return true;
-		}
+	rpi->processing_layer++;
+	if (rpi->processing_layer == atlas->reflections[rpi->atlas_index].data.layers[0].mipmaps.size()) {
+		rpi->rendering = false;
+		rpi->processing_layer = 1;
+		return true;
 	}
 
 	return false;

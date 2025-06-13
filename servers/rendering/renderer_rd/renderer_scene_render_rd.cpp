@@ -1144,8 +1144,8 @@ int RendererSceneRenderRD::get_roughness_layers() const {
 	return sky.roughness_layers;
 }
 
-bool RendererSceneRenderRD::is_using_radiance_cubemap_array() const {
-	return sky.sky_use_cubemap_array;
+bool RendererSceneRenderRD::is_using_radiance_octmap_array() const {
+	return sky.sky_use_octmap_array;
 }
 
 void RendererSceneRenderRD::_update_vrs(Ref<RenderSceneBuffersRD> p_render_buffers) {
@@ -1569,7 +1569,7 @@ void RendererSceneRenderRD::init() {
 	}
 
 	if (is_volumetric_supported()) {
-		RendererRD::Fog::get_singleton()->init_fog_shader(RendererRD::LightStorage::get_singleton()->get_max_directional_lights(), get_roughness_layers(), is_using_radiance_cubemap_array());
+		RendererRD::Fog::get_singleton()->init_fog_shader(RendererRD::LightStorage::get_singleton()->get_max_directional_lights(), get_roughness_layers(), is_using_radiance_octmap_array());
 	}
 
 	RSG::camera_attributes->camera_attributes_set_dof_blur_bokeh_shape(RS::DOFBokehShape(int(GLOBAL_GET("rendering/camera/depth_of_field/depth_of_field_bokeh_shape"))));
@@ -1599,8 +1599,20 @@ void RendererSceneRenderRD::init() {
 
 	bool can_use_storage = _render_buffers_can_be_storage();
 	bool can_use_vrs = is_vrs_supported();
+	BitField<RendererRD::CopyEffects::RasterEffects> raster_effects;
+	if (!can_use_storage) {
+		raster_effects.set_flag(RendererRD::CopyEffects::RASTER_EFFECT_COPY);
+		raster_effects.set_flag(RendererRD::CopyEffects::RASTER_EFFECT_GAUSSIAN_BLUR);
+
+		// This path can be used in the future to redirect certain devices to use the raster version of the effect, either due to performance or driver errors.
+		bool use_raster_for_octmaps = false;
+		if (use_raster_for_octmaps) {
+			raster_effects.set_flag(RendererRD::CopyEffects::RASTER_EFFECT_OCTMAP);
+		}
+	}
+
 	bokeh_dof = memnew(RendererRD::BokehDOF(!can_use_storage));
-	copy_effects = memnew(RendererRD::CopyEffects(!can_use_storage));
+	copy_effects = memnew(RendererRD::CopyEffects(raster_effects));
 	debug_effects = memnew(RendererRD::DebugEffects);
 	luminance = memnew(RendererRD::Luminance(!can_use_storage));
 	smaa = memnew(RendererRD::SMAA);
