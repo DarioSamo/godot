@@ -160,8 +160,8 @@ public:
 		uint32_t root_signature_crc = 0;
 	};
 
-	RenderingShaderContainerD3D12();
-	RenderingShaderContainerD3D12(void *p_lib_d3d12);
+	RenderingShaderContainerD3D12(RenderingShaderContainer::OptionFlags p_option_flags);
+	RenderingShaderContainerD3D12(RenderingShaderContainer::OptionFlags p_option_flags, void *p_lib_d3d12);
 	ShaderReflectionD3D12 get_shader_reflection_d3d12() const;
 };
 
@@ -171,7 +171,7 @@ protected:
 
 public:
 	void set_lib_d3d12(void *p_lib_d3d12);
-	virtual Ref<RenderingShaderContainer> create_container() const override;
+	virtual Ref<RenderingShaderContainer> create_container(RenderingShaderContainer::OptionFlags p_option_flags) const override;
 	virtual ShaderLanguageVersion get_shader_language_version() const override;
 	virtual ShaderSpirvVersion get_shader_spirv_version() const override;
 	RenderingShaderContainerFormatD3D12();

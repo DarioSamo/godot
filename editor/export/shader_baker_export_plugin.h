@@ -71,6 +71,7 @@ protected:
 	Mutex shader_work_results_mutex;
 	LocalVector<ShaderGroupItem> shader_group_items;
 	RenderingShaderContainerFormat *shader_container_format = nullptr;
+	BitField<RenderingShaderContainer::OptionFlags> shader_option_flags = RenderingShaderContainer::OPTION_NONE;
 	String shader_container_driver;
 	Vector<Ref<ShaderBakerExportPluginPlatform>> platforms;
 	uint64_t customization_configuration_hash = 0;

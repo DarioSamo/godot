@@ -109,6 +109,21 @@ bool ShaderBakerExportPlugin::_begin_customize_resources(const Ref<EditorExportP
 	tasks_total = 0;
 	tasks_cancelled = false;
 
+	// Retrieve the options that will be used for creating shaders.
+	shader_option_flags = RenderingShaderContainer::OPTION_NONE;
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/compress")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_USE_IR_COMPRESSION);
+	}
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/use_zstd_compression")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_USE_ZSTD_COMPRESSION);
+	}
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/strip_debug")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_STRIP_DEBUG_INFO);
+	}
+
 	StringBuilder to_hash;
 	to_hash.append("[GodotVersionNumber]");
 	to_hash.append(GODOT_VERSION_NUMBER);
@@ -116,6 +131,8 @@ bool ShaderBakerExportPlugin::_begin_customize_resources(const Ref<EditorExportP
 	to_hash.append(GODOT_VERSION_HASH);
 	to_hash.append("[Renderer]");
 	to_hash.append(shader_cache_renderer_name);
+	to_hash.append("[ShaderOptions]");
+	to_hash.append(vformat("%d", (uint32_t)(shader_option_flags)));
 	customization_configuration_hash = to_hash.as_string().hash64();
 
 	BitField<RenderingShaderLibrary::FeatureBits> renderer_features = {};
@@ -427,7 +444,7 @@ void ShaderBakerExportPlugin::_process_work_item(WorkItem p_work_item) {
 		Error err = RenderingDeviceCommons::reflect_spirv(spirv_data, shader_refl);
 		ERR_FAIL_COND_MSG(err != OK, "Unable to reflect SPIR-V data that was compiled");
 
-		Ref<RenderingShaderContainer> shader_container = shader_container_format->create_container();
+		Ref<RenderingShaderContainer> shader_container = shader_container_format->create_container(shader_option_flags);
 		shader_container->set_from_shader_reflection(p_work_item.shader_name, shader_refl);
 
 		// Compile shader binary from SPIR-V.

@@ -842,11 +842,13 @@ bool RenderingShaderContainerD3D12::_set_code_from_spirv(const Vector<RenderingD
 #endif
 }
 
-RenderingShaderContainerD3D12::RenderingShaderContainerD3D12() {
+RenderingShaderContainerD3D12::RenderingShaderContainerD3D12(RenderingShaderContainer::OptionFlags p_option_flags) :
+		RenderingShaderContainer(p_option_flags) {
 	// Default empty constructor.
 }
 
-RenderingShaderContainerD3D12::RenderingShaderContainerD3D12(void *p_lib_d3d12) {
+RenderingShaderContainerD3D12::RenderingShaderContainerD3D12(RenderingShaderContainer::OptionFlags p_option_flags, void *p_lib_d3d12) :
+		RenderingShaderContainer(p_option_flags) {
 	lib_d3d12 = p_lib_d3d12;
 }
 
@@ -880,8 +882,8 @@ void RenderingShaderContainerFormatD3D12::set_lib_d3d12(void *p_lib_d3d12) {
 	lib_d3d12 = p_lib_d3d12;
 }
 
-Ref<RenderingShaderContainer> RenderingShaderContainerFormatD3D12::create_container() const {
-	return memnew(RenderingShaderContainerD3D12(lib_d3d12));
+Ref<RenderingShaderContainer> RenderingShaderContainerFormatD3D12::create_container(RenderingShaderContainer::OptionFlags p_option_flags) const {
+	return memnew(RenderingShaderContainerD3D12(p_option_flags, lib_d3d12));
 }
 
 RenderingDeviceCommons::ShaderLanguageVersion RenderingShaderContainerFormatD3D12::get_shader_language_version() const {

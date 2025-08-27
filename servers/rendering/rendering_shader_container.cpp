@@ -458,6 +458,8 @@ bool RenderingShaderContainer::decompress_code(const uint8_t *p_compressed_bytes
 	return true;
 }
 
-RenderingShaderContainer::RenderingShaderContainer() {}
+RenderingShaderContainer::RenderingShaderContainer(OptionFlags p_option_flags) {
+	option_flags = p_option_flags;
+}
 
 RenderingShaderContainer::~RenderingShaderContainer() {}

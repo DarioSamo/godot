@@ -138,9 +138,6 @@ private:
 	static String shader_cache_user_dir;
 	static String shader_cache_res_dir;
 	static bool shader_cache_cleanup_on_start;
-	static bool shader_cache_save_compressed;
-	static bool shader_cache_save_compressed_zstd;
-	static bool shader_cache_save_debug;
 	bool shader_cache_user_dir_valid = false;
 
 	enum StageType {
@@ -232,9 +229,6 @@ public:
 	static const String &get_shader_cache_user_dir();
 	static void set_shader_cache_res_dir(const String &p_dir);
 	static const String &get_shader_cache_res_dir();
-	static void set_shader_cache_save_compressed(bool p_enable);
-	static void set_shader_cache_save_compressed_zstd(bool p_enable);
-	static void set_shader_cache_save_debug(bool p_enable);
 
 	static Vector<RD::ShaderStageSPIRVData> compile_stages(const Vector<String> &p_stage_sources);
 	static PackedByteArray save_shader_cache_bytes(const LocalVector<int> &p_variants, const Vector<Vector<uint8_t>> &p_variant_data);

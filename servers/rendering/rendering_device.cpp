@@ -3372,7 +3372,7 @@ Vector<uint8_t> RenderingDevice::shader_compile_binary_from_spirv(const Vector<S
 	}
 
 	const RenderingShaderContainerFormat &container_format = driver->get_shader_container_format();
-	Ref<RenderingShaderContainer> shader_container = container_format.create_container();
+	Ref<RenderingShaderContainer> shader_container = container_format.create_container(shader_option_flags);
 	ERR_FAIL_COND_V(shader_container.is_null(), Vector<uint8_t>());
 
 	shader_container->set_from_shader_reflection(p_shader_name, shader_refl);
@@ -3395,7 +3395,7 @@ RID RenderingDevice::shader_create_from_bytecode(const Vector<uint8_t> &p_shader
 RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder, const Vector<PipelineImmutableSampler> &p_immutable_samplers) {
 	_THREAD_SAFE_METHOD_
 
-	Ref<RenderingShaderContainer> shader_container = driver->get_shader_container_format().create_container();
+	Ref<RenderingShaderContainer> shader_container = driver->get_shader_container_format().create_container(shader_option_flags);
 	ERR_FAIL_COND_V(shader_container.is_null(), RID());
 
 	bool parsed_container = shader_container->from_bytes(p_shader_binary);
@@ -6893,6 +6893,21 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 
 	// Find the best method available for VRS on the current hardware.
 	_vrs_detect_method();
+
+	// Set the option flags that will be used for all shaders created by the device.
+	shader_option_flags = RenderingShaderContainer::OPTION_NONE;
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/compress")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_USE_IR_COMPRESSION);
+	}
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/use_zstd_compression")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_USE_ZSTD_COMPRESSION);
+	}
+
+	if (GLOBAL_GET("rendering/shader_compiler/shader_cache/strip_debug")) {
+		shader_option_flags.set_flag(RenderingShaderContainer::OPTION_STRIP_DEBUG_INFO);
+	}
 
 	return OK;
 }

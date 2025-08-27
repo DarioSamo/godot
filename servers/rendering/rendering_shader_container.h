@@ -40,6 +40,13 @@ public:
 	static const uint32_t CONTAINER_MAGIC_NUMBER = 0x43535247;
 	static const uint32_t CONTAINER_VERSION = 2;
 
+	enum OptionFlags {
+		OPTION_NONE = 0x0,
+		OPTION_USE_IR_COMPRESSION = 0x1,
+		OPTION_USE_ZSTD_COMPRESSION = 0x2,
+		OPTION_STRIP_DEBUG_INFO = 0x4,
+	};
+
 protected:
 	struct ContainerHeader {
 		uint32_t magic_number = 0;
@@ -89,6 +96,7 @@ protected:
 		uint32_t code_decompressed_size = 0;
 	};
 
+	OptionFlags option_flags;
 	ReflectionData reflection_data;
 	Vector<uint32_t> reflection_binding_set_uniforms_count;
 	Vector<ReflectionBindingData> reflection_binding_set_uniforms_data;
@@ -145,13 +153,13 @@ public:
 	PackedByteArray to_bytes() const;
 	bool compress_code(const uint8_t *p_decompressed_bytes, uint32_t p_decompressed_size, uint8_t *p_compressed_bytes, uint32_t *r_compressed_size, uint32_t *r_compressed_flags) const;
 	bool decompress_code(const uint8_t *p_compressed_bytes, uint32_t p_compressed_size, uint32_t p_compressed_flags, uint8_t *p_decompressed_bytes, uint32_t p_decompressed_size) const;
-	RenderingShaderContainer();
+	RenderingShaderContainer(OptionFlags p_option_flags);
 	virtual ~RenderingShaderContainer();
 };
 
 class RenderingShaderContainerFormat : public RenderingDeviceCommons {
 public:
-	virtual Ref<RenderingShaderContainer> create_container() const = 0;
+	virtual Ref<RenderingShaderContainer> create_container(RenderingShaderContainer::OptionFlags p_option_flags) const = 0;
 	virtual ShaderLanguageVersion get_shader_language_version() const = 0;
 	virtual ShaderSpirvVersion get_shader_spirv_version() const = 0;
 };

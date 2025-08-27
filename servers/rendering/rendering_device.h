@@ -876,6 +876,7 @@ private:
 	String _shader_uniform_debug(RID p_shader, int p_set = -1);
 
 	RID_Owner<Shader, true> shader_owner;
+	BitField<RenderingShaderContainer::OptionFlags> shader_option_flags = RenderingShaderContainer::OPTION_NONE;
 
 #ifndef DISABLE_DEPRECATED
 public:

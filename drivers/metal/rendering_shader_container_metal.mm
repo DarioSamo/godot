@@ -688,9 +688,14 @@ uint32_t RenderingShaderContainerMetal::_format_version() const {
 	return FORMAT_VERSION;
 }
 
-Ref<RenderingShaderContainer> RenderingShaderContainerFormatMetal::create_container() const {
+RenderingShaderContainerMetal::RenderingShaderContainerMetal(RenderingShaderContainer::OptionFlags p_option_flags) :
+		RenderingShaderContainer(p_option_flags) {
+	// Do nothing.
+}
+
+Ref<RenderingShaderContainer> RenderingShaderContainerFormatMetal::create_container(RenderingShaderContainer::OptionFlags p_option_flags) const {
 	Ref<RenderingShaderContainerMetal> result;
-	result.instantiate();
+	result.instantiate(p_option_flags);
 	result->set_export_mode(export_mode);
 	result->set_device_profile(device_profile);
 	return result;
