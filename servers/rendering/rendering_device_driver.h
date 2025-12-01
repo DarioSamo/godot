@@ -189,6 +189,7 @@ public:
 
 	struct TextureView {
 		DataFormat format = DATA_FORMAT_MAX;
+		TextureAspect aspect = TEXTURE_ASPECT_MAX;
 		TextureSwizzle swizzle_r = TEXTURE_SWIZZLE_R;
 		TextureSwizzle swizzle_g = TEXTURE_SWIZZLE_G;
 		TextureSwizzle swizzle_b = TEXTURE_SWIZZLE_B;
@@ -212,22 +213,9 @@ public:
 		TEXTURE_LAYOUT_MAX
 	};
 
-	enum TextureAspect {
-		TEXTURE_ASPECT_COLOR = 0,
-		TEXTURE_ASPECT_DEPTH = 1,
-		TEXTURE_ASPECT_STENCIL = 2,
-		TEXTURE_ASPECT_MAX
-	};
-
 	enum TextureUsageMethod {
 		TEXTURE_USAGE_VRS_FRAGMENT_SHADING_RATE_BIT = TEXTURE_USAGE_MAX_BIT << 1,
 		TEXTURE_USAGE_VRS_FRAGMENT_DENSITY_MAP_BIT = TEXTURE_USAGE_MAX_BIT << 2,
-	};
-
-	enum TextureAspectBits {
-		TEXTURE_ASPECT_COLOR_BIT = (1 << TEXTURE_ASPECT_COLOR),
-		TEXTURE_ASPECT_DEPTH_BIT = (1 << TEXTURE_ASPECT_DEPTH),
-		TEXTURE_ASPECT_STENCIL_BIT = (1 << TEXTURE_ASPECT_STENCIL),
 	};
 
 	struct TextureSubresource {

@@ -628,7 +628,12 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 			} else {
 				// The index is just the latest command index that wrote to the resource.
 				if (search_tracker->write_command_or_list_index == p_command_index) {
+#if 0
+					// FIXME: There's an upstream bug where two slices of the same resource can't be present in the same command because one triggers a layout transition
+					// and the other tracker believes it has to be dependent on the same command that performs the transition. This should be fixed in general at some other
+					// point by making the graph capable of tracking this scenario, since it's not actually an error as far as the renderer is concerned.
 					ERR_FAIL_MSG("Command can't have itself as a dependency.");
+#endif
 				} else {
 					_check_discardable_attachment_dependency(search_tracker, search_tracker->write_command_or_list_index, p_command_index);
 					_add_adjacent_command(search_tracker->write_command_or_list_index, p_command_index, r_command);

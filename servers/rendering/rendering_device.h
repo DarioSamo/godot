@@ -372,6 +372,7 @@ public:
 public:
 	struct TextureView {
 		DataFormat format_override = DATA_FORMAT_MAX; // // Means, use same as format.
+		TextureAspect aspect = TEXTURE_ASPECT_MAX;
 		TextureSwizzle swizzle_r = TEXTURE_SWIZZLE_R;
 		TextureSwizzle swizzle_g = TEXTURE_SWIZZLE_G;
 		TextureSwizzle swizzle_b = TEXTURE_SWIZZLE_B;
@@ -379,6 +380,8 @@ public:
 
 		bool operator==(const TextureView &p_other) const {
 			if (format_override != p_other.format_override) {
+				return false;
+			} else if (aspect != p_other.aspect) {
 				return false;
 			} else if (swizzle_r != p_other.swizzle_r) {
 				return false;

@@ -31,11 +31,14 @@ layout(push_constant, std430) uniform Params {
 	float z_near;
 	bool orthogonal;
 	float radius_sq;
-	uvec2 pad;
+	int stencil_mask;
+	uint pad;
 }
 params;
 
-layout(set = 0, binding = 0) uniform sampler2D source_depth;
+layout(set = 0, binding = 0) uniform texture2D source_depth;
+layout(set = 0, binding = 1) uniform itexture2D source_stencil;
+layout(set = 0, binding = 2) uniform sampler source_sampler;
 
 layout(r16f, set = 1, binding = 0) uniform restrict writeonly image2DArray dest_image0; //rename
 #ifdef GENERATE_MIPS
@@ -75,6 +78,14 @@ float screen_space_to_view_space_depth(float p_depth) {
 	float depth_linearize_add = params.z_far;
 
 	return depth_linearize_mul / (depth_linearize_add - p_depth);
+}
+
+vec4 stencil_mask_multiplier(ivec4 p_stencil) {
+	return vec4(step(p_stencil & ivec4(params.stencil_mask), ivec4(1)));
+}
+
+float stencil_mask_multiplier(int p_stencil) {
+	return float(step(p_stencil & params.stencil_mask, int(1)));
 }
 
 #ifdef GENERATE_MIPS
@@ -186,14 +197,18 @@ void main() {
 #ifdef USE_HALF_BUFFERS
 // Half buffers means that we divide depth into two half res buffers (we only capture 1/4 of pixels).
 #ifdef USE_HALF_SIZE
-	float sample_00 = texelFetch(source_depth, ivec2(4 * gl_GlobalInvocationID.x + 0, 4 * gl_GlobalInvocationID.y + 0), 0).x;
-	float sample_11 = texelFetch(source_depth, ivec2(4 * gl_GlobalInvocationID.x + 2, 4 * gl_GlobalInvocationID.y + 2), 0).x;
+	float sample_00 = texelFetch(sampler2D(source_depth, source_sampler), ivec2(4 * gl_GlobalInvocationID.x + 0, 4 * gl_GlobalInvocationID.y + 0), 0).x;
+	float sample_11 = texelFetch(sampler2D(source_depth, source_sampler), ivec2(4 * gl_GlobalInvocationID.x + 2, 4 * gl_GlobalInvocationID.y + 2), 0).x;
+	int stencil_00 = texelFetch(isampler2D(source_stencil, source_sampler), ivec2(4 * gl_GlobalInvocationID.x + 0, 4 * gl_GlobalInvocationID.y + 0), 0).x;
+	int stencil_11 = texelFetch(isampler2D(source_stencil, source_sampler), ivec2(4 * gl_GlobalInvocationID.x + 2, 4 * gl_GlobalInvocationID.y + 2), 0).x;
 #else
-	float sample_00 = texelFetch(source_depth, ivec2(2 * gl_GlobalInvocationID.x + 0, 2 * gl_GlobalInvocationID.y + 0), 0).x;
-	float sample_11 = texelFetch(source_depth, ivec2(2 * gl_GlobalInvocationID.x + 1, 2 * gl_GlobalInvocationID.y + 1), 0).x;
+	float sample_00 = texelFetch(sampler2D(source_depth, source_sampler), ivec2(2 * gl_GlobalInvocationID.x + 0, 2 * gl_GlobalInvocationID.y + 0), 0).x;
+	float sample_11 = texelFetch(sampler2D(source_depth, source_sampler), ivec2(2 * gl_GlobalInvocationID.x + 1, 2 * gl_GlobalInvocationID.y + 1), 0).x;
+	int stencil_00 = texelFetch(isampler2D(source_stencil, source_sampler), ivec2(2 * gl_GlobalInvocationID.x + 0, 2 * gl_GlobalInvocationID.y + 0), 0).x;
+	int stencil_11 = texelFetch(isampler2D(source_stencil, source_sampler), ivec2(2 * gl_GlobalInvocationID.x + 1, 2 * gl_GlobalInvocationID.y + 1), 0).x;
 #endif
-	sample_00 = screen_space_to_view_space_depth(sample_00);
-	sample_11 = screen_space_to_view_space_depth(sample_11);
+	sample_00 = screen_space_to_view_space_depth(sample_00 * stencil_mask_multiplier(stencil_00));
+	sample_11 = screen_space_to_view_space_depth(sample_11 * stencil_mask_multiplier(stencil_11));
 
 	imageStore(dest_image0, ivec3(gl_GlobalInvocationID.xy, 0), vec4(sample_00));
 	imageStore(dest_image0, ivec3(gl_GlobalInvocationID.xy, 3), vec4(sample_11));
@@ -204,17 +219,26 @@ void main() {
 
 	vec2 uv = (vec2(depth_buffer_coord) + 0.5f) * params.pixel_size;
 	vec4 samples;
-	samples.x = textureLodOffset(source_depth, uv, 0, ivec2(0, 2)).x;
-	samples.y = textureLodOffset(source_depth, uv, 0, ivec2(2, 2)).x;
-	samples.z = textureLodOffset(source_depth, uv, 0, ivec2(2, 0)).x;
-	samples.w = textureLodOffset(source_depth, uv, 0, ivec2(0, 0)).x;
+	ivec4 stencils;
+	samples.x = textureLodOffset(sampler2D(source_depth, source_sampler), uv, 0, ivec2(0, 2)).x;
+	samples.y = textureLodOffset(sampler2D(source_depth, source_sampler), uv, 0, ivec2(2, 2)).x;
+	samples.z = textureLodOffset(sampler2D(source_depth, source_sampler), uv, 0, ivec2(2, 0)).x;
+	samples.w = textureLodOffset(sampler2D(source_depth, source_sampler), uv, 0, ivec2(0, 0)).x;
+	stencils.x = textureLodOffset(isampler2D(source_stencil, source_sampler), uv, 0, ivec2(0, 2)).x;
+	stencils.y = textureLodOffset(isampler2D(source_stencil, source_sampler), uv, 0, ivec2(2, 2)).x;
+	stencils.z = textureLodOffset(isampler2D(source_stencil, source_sampler), uv, 0, ivec2(2, 0)).x;
+	stencils.w = textureLodOffset(isampler2D(source_stencil, source_sampler), uv, 0, ivec2(0, 0)).x;
 #else
 	ivec2 depth_buffer_coord = 2 * ivec2(gl_GlobalInvocationID.xy);
 	ivec2 output_coord = ivec2(gl_GlobalInvocationID);
 
 	vec2 uv = (vec2(depth_buffer_coord) + 0.5f) * params.pixel_size;
-	vec4 samples = textureGather(source_depth, uv);
+	vec4 samples = textureGather(sampler2D(source_depth, source_sampler), uv);
+	ivec4 stencils = textureGather(isampler2D(source_stencil, source_sampler), uv);
 #endif //USE_HALF_SIZE
+
+	samples *= stencil_mask_multiplier(stencils);
+
 #ifdef GENERATE_MIPS
 	prepare_depths_and_mips(samples, output_coord, gl_LocalInvocationID.xy);
 #else

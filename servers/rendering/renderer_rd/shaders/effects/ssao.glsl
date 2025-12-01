@@ -100,7 +100,8 @@ layout(push_constant, std430) uniform Params {
 	vec2 NDC_to_view_mul;
 	vec2 NDC_to_view_add;
 
-	vec2 pad2;
+	float max_depth;
+	float pad;
 	vec2 half_screen_pixel_size_x025;
 
 	float radius;
@@ -256,6 +257,13 @@ void generate_SSAO_shadows_internal(out float r_shadow_term, out vec4 r_edges, o
 
 	// get this pixel's viewspace depth
 	pix_z = valuesUL.y;
+	if (pix_z >= params.max_depth) {
+		// Early return if pixel is infinitely far away.
+		r_shadow_term = 1.0;
+		r_edges = vec4(0.0);
+		r_weight = 1.0;
+		return;
+	}
 
 	// get left right top bottom neighboring pixels for edge detection (gets compiled out on quality_level == 0)
 	pix_left_z = valuesUL.x;

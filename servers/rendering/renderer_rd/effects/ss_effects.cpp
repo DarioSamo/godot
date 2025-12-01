@@ -47,6 +47,35 @@ static _FORCE_INLINE_ void store_camera(const Projection &p_mtx, float *p_array)
 	}
 }
 
+static _FORCE_INLINE_ void compute_linear_depth_constants(const Projection &p_projection, float &r_z_near, float &r_z_far, uint32_t &r_orthogonal) {
+	Projection correction;
+	correction.set_depth_correction(false);
+	Projection temp = correction * p_projection;
+
+	float depth_linearize_mul = -temp.columns[3][2];
+	float depth_linearize_add = temp.columns[2][2];
+	if ((depth_linearize_mul * depth_linearize_add) < 0) {
+		depth_linearize_add = -depth_linearize_add;
+	}
+
+	r_orthogonal = p_projection.is_orthogonal() ? 1 : 0;
+	r_z_near = depth_linearize_mul;
+	r_z_far = depth_linearize_add;
+
+	if (r_orthogonal != 0) {
+		r_z_near = p_projection.get_z_near();
+		r_z_far = p_projection.get_z_far();
+	}
+}
+
+float screen_space_to_view_space_depth(float p_depth, float p_z_near, float p_z_far, uint32_t p_orthogonal) {
+	if (p_orthogonal) {
+		return -((p_depth * 2.0 - 1.0) * (p_z_far - p_z_near) - (p_z_far + p_z_near)) / 2.0;
+	} else {
+		return p_z_near / (p_z_far - p_depth);
+	}
+}
+
 SSEffects::SSEffects() {
 	singleton = this;
 
@@ -483,37 +512,28 @@ void SSEffects::downsample_depth(Ref<RenderSceneBuffersRD> p_render_buffers, uin
 		downsample_uniform_set = uniform_set_cache->get_cache_vec(shader, 2, u_depths);
 	}
 
-	Projection correction;
-	correction.set_depth_correction(false);
-	Projection temp = correction * p_projection;
+	compute_linear_depth_constants(p_projection, ss_effects.downsample_push_constant.z_near, ss_effects.downsample_push_constant.z_far, ss_effects.downsample_push_constant.orthogonal);
 
-	float depth_linearize_mul = -temp.columns[3][2];
-	float depth_linearize_add = temp.columns[2][2];
-	if (depth_linearize_mul * depth_linearize_add < 0) {
-		depth_linearize_add = -depth_linearize_add;
-	}
-
-	ss_effects.downsample_push_constant.orthogonal = p_projection.is_orthogonal();
-	ss_effects.downsample_push_constant.z_near = depth_linearize_mul;
-	ss_effects.downsample_push_constant.z_far = depth_linearize_add;
-	if (ss_effects.downsample_push_constant.orthogonal) {
-		ss_effects.downsample_push_constant.z_near = p_projection.get_z_near();
-		ss_effects.downsample_push_constant.z_far = p_projection.get_z_far();
-	}
 	ss_effects.downsample_push_constant.pixel_size[0] = 1.0 / full_screen_size.x;
 	ss_effects.downsample_push_constant.pixel_size[1] = 1.0 / full_screen_size.y;
 	ss_effects.downsample_push_constant.radius_sq = 1.0;
 
-	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	// FIXME: Hardcoded constant for skipping SSAO on any pixels that have painted the stencil buffer with a certain value.
+	constexpr int SSAO_STENCIL_MASK = 0x80;
+	ss_effects.downsample_push_constant.stencil_mask = SSAO_STENCIL_MASK;
 
 	RID depth_texture = p_render_buffers->get_depth_texture(p_view);
+	RID stencil_texture = p_render_buffers->get_stencil_texture(p_view);
+	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID depth_mipmap = p_render_buffers->get_texture_slice(RB_SCOPE_SSDS, RB_LINEAR_DEPTH, p_view * 4, depth_index, 4, 1);
 
-	RD::Uniform u_depth_buffer(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, depth_texture }));
-	RD::Uniform u_depth_mipmap(RD::UNIFORM_TYPE_IMAGE, 0, Vector<RID>({ depth_mipmap }));
+	RD::Uniform u_depth_buffer(RD::UNIFORM_TYPE_TEXTURE, 0, depth_texture);
+	RD::Uniform u_stencil_buffer(RD::UNIFORM_TYPE_TEXTURE, 1, stencil_texture);
+	RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 2, default_sampler);
+	RD::Uniform u_depth_mipmap(RD::UNIFORM_TYPE_IMAGE, 0, depth_mipmap);
 
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ss_effects.pipelines[downsample_mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_depth_buffer), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_depth_buffer, u_stencil_buffer, u_sampler), 0);
 	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_depth_mipmap), 1);
 	if (use_mips) {
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, downsample_uniform_set, 2);
@@ -718,6 +738,13 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 		ssil.gather_push_constant.quality = MAX(0, ssil_quality - 1);
 		ssil.gather_push_constant.size_multiplier = ssil_half_size ? 2 : 1;
+
+		float z_near, z_far;
+		uint32_t orthogonal;
+		compute_linear_depth_constants(p_projection, z_near, z_far, orthogonal);
+
+		const float DEPTH_EPSILON = 1e-6f;
+		ssao.gather_push_constant.max_depth = screen_space_to_view_space_depth(DEPTH_EPSILON, z_near, z_far, orthogonal);
 
 		// We are using our uniform cache so our uniform sets are automatically freed when our textures are freed.
 		// It also ensures that we're reusing the right cached entry in a multiview situation without us having to

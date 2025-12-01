@@ -488,6 +488,19 @@ public:
 		TEXTURE_SLICE_MAX
 	};
 
+	enum TextureAspect {
+		TEXTURE_ASPECT_COLOR = 0,
+		TEXTURE_ASPECT_DEPTH = 1,
+		TEXTURE_ASPECT_STENCIL = 2,
+		TEXTURE_ASPECT_MAX
+	};
+
+	enum TextureAspectBits {
+		TEXTURE_ASPECT_COLOR_BIT = (1 << TEXTURE_ASPECT_COLOR),
+		TEXTURE_ASPECT_DEPTH_BIT = (1 << TEXTURE_ASPECT_DEPTH),
+		TEXTURE_ASPECT_STENCIL_BIT = (1 << TEXTURE_ASPECT_STENCIL),
+	};
+
 	/*****************/
 	/**** SAMPLER ****/
 	/*****************/

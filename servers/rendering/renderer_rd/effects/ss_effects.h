@@ -180,7 +180,8 @@ private:
 		float z_near;
 		uint32_t orthogonal;
 		float radius_sq;
-		uint32_t pad[2];
+		int stencil_mask;
+		uint32_t pad;
 	};
 
 	enum SSEffectsMode {
@@ -342,7 +343,8 @@ private:
 		float NDC_to_view_mul[2];
 		float NDC_to_view_add[2];
 
-		float pad[2];
+		float max_depth;
+		float pad;
 		float half_screen_pixel_size_x025[2];
 
 		float radius;

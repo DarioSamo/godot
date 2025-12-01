@@ -461,12 +461,13 @@ RID RenderSceneBuffersRD::get_texture_slice_view(const StringName &p_context, co
 		itos(p_mipmap),
 		itos(p_mipmaps),
 		itos(p_view.format_override),
+		itos(p_view.aspect),
 		itos(p_view.swizzle_r),
 		itos(p_view.swizzle_g),
 		itos(p_view.swizzle_b),
 		itos(p_view.swizzle_a)
 	};
-	RD::get_singleton()->set_resource_name(slice, String("RenderBuffer {0}/{1}, layer {2}/{3}, mipmap {4}/{5}, view {6}/{7}/{8}/{9}/{10}").format(arr));
+	RD::get_singleton()->set_resource_name(slice, String("RenderBuffer {0}/{1}, layer {2}/{3}, mipmap {4}/{5}, view {6}/{7}/{8}/{9}/{10}/{11}").format(arr));
 
 	// and return our slice
 	return slice;
@@ -638,6 +639,19 @@ RID RenderSceneBuffersRD::get_depth_texture(const uint32_t p_layer) {
 		return depth_slice;
 	} else {
 		return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, p_layer, 0);
+	}
+}
+
+RID RenderSceneBuffersRD::get_stencil_texture(const uint32_t p_layer) {
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	RID depth_slice = texture_storage->render_target_get_override_depth_slice(render_target, p_layer);
+	if (depth_slice.is_valid()) {
+		// TODO: Render target overrides do not currently support fetching the stencil buffer.
+		return RID();
+	} else {
+		RD::TextureView stencil_view;
+		stencil_view.aspect = RD::TEXTURE_ASPECT_STENCIL;
+		return get_texture_slice_view(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, p_layer, 0, 1, 1, stencil_view);
 	}
 }
 

@@ -135,6 +135,7 @@ private:
 			h = hash_murmur3_one_32(p_val.mipmap, h);
 			h = hash_murmur3_one_32(p_val.mipmaps, h);
 			h = hash_murmur3_one_32(p_val.texture_view.format_override, h);
+			h = hash_murmur3_one_32(p_val.texture_view.aspect, h);
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_r, h);
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_g, h);
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_b, h);
@@ -275,6 +276,8 @@ public:
 	bool has_depth_texture();
 	RID get_depth_texture();
 	RID get_depth_texture(const uint32_t p_layer);
+
+	RID get_stencil_texture(const uint32_t p_layer);
 
 	RID get_depth_msaa() const {
 		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA);

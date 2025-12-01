@@ -2103,6 +2103,10 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared(TextureID p_or
 		}
 	}
 
+	if (p_view.aspect != TEXTURE_ASPECT_MAX) {
+		image_view_create_info.subresourceRange.aspectMask = (VkImageAspectFlags)(1 << p_view.aspect);
+	}
+
 	VkImageView new_vk_image_view = VK_NULL_HANDLE;
 	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &new_vk_image_view);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
@@ -2155,6 +2159,10 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
 	image_view_create_info.subresourceRange.levelCount = p_mipmaps;
 	image_view_create_info.subresourceRange.baseArrayLayer = p_layer;
 	image_view_create_info.subresourceRange.layerCount = p_layers;
+
+	if (p_view.aspect != TEXTURE_ASPECT_MAX) {
+		image_view_create_info.subresourceRange.aspectMask = (VkImageAspectFlags)(1 << p_view.aspect);
+	}
 
 	VkImageView new_vk_image_view = VK_NULL_HANDLE;
 	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &new_vk_image_view);

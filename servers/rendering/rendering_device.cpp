@@ -1108,6 +1108,8 @@ RID RenderingDevice::texture_create_shared(const TextureView &p_view, RID p_with
 		tv.format = p_view.format_override;
 		create_shared = driver->texture_can_make_shared_with_format(texture.driver_id, p_view.format_override, raw_reintepretation);
 	}
+
+	tv.aspect = p_view.aspect;
 	tv.swizzle_r = p_view.swizzle_r;
 	tv.swizzle_g = p_view.swizzle_g;
 	tv.swizzle_b = p_view.swizzle_b;
@@ -1274,6 +1276,7 @@ RID RenderingDevice::texture_create_shared_from_slice(const TextureView &p_view,
 		create_shared = driver->texture_can_make_shared_with_format(texture.driver_id, p_view.format_override, raw_reintepretation);
 	}
 
+	tv.aspect = p_view.aspect;
 	tv.swizzle_r = p_view.swizzle_r;
 	tv.swizzle_g = p_view.swizzle_g;
 	tv.swizzle_b = p_view.swizzle_b;
