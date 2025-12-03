@@ -64,9 +64,9 @@ class ClusterBuilderSharedDataRD {
 	struct ClusterRender {
 		struct PushConstant {
 			uint32_t base_index;
-			uint32_t pad0;
 			uint32_t pad1;
 			uint32_t pad2;
+			uint32_t pad3;
 		};
 
 		ClusterRenderShaderRD cluster_render_shader;
@@ -96,11 +96,11 @@ class ClusterBuilderSharedDataRD {
 			uint32_t cluster_render_data_size; // how much data for a single cluster takes
 			uint32_t max_render_element_count_div_32; // divided by 32
 			uint32_t cluster_screen_size[2];
+
 			uint32_t render_element_count_div_32; // divided by 32
 			uint32_t max_cluster_element_count_div_32; // divided by 32
-
-			uint32_t pad1;
-			uint32_t pad2;
+			uint32_t cluster_buffer_validation_offset;
+			uint32_t cluster_render_validation_offset;
 		};
 
 		ClusterStoreShaderRD cluster_store_shader;
@@ -121,9 +121,8 @@ class ClusterBuilderSharedDataRD {
 
 			uint32_t orthogonal;
 			uint32_t max_cluster_element_count_div_32;
-
-			uint32_t pad1;
-			uint32_t pad2;
+			uint32_t cluster_buffer_validation_offset;
+			uint32_t pad;
 		};
 
 		ClusterDebugShaderRD cluster_debug_shader;
@@ -208,10 +207,13 @@ private:
 
 	RID framebuffer;
 	RID cluster_render_buffer; // Used for creating.
+	RID cluster_render_mutex_buffer; // Used for locking during creation.
 	RID cluster_buffer; // Used for rendering.
 	RID element_buffer; // Used for storing, to hint element touches far plane or near plane.
-	uint32_t cluster_render_buffer_size = 0;
-	uint32_t cluster_buffer_size = 0;
+	uint32_t cluster_buffer_validation_offset = 0;
+	uint32_t cluster_buffer_validation_size = 0;
+	uint32_t cluster_render_validation_offset = 0;
+	uint32_t cluster_render_validation_size = 0;
 
 	RID cluster_render_uniform_set;
 	RID cluster_store_uniform_set;
@@ -227,8 +229,7 @@ private:
 		uint32_t cluster_screen_width;
 		uint32_t cluster_data_size; // How much data is needed for a single cluster.
 		uint32_t cluster_depth_offset;
-
-		uint32_t pad0;
+		uint32_t cluster_render_validation_offset;
 		uint32_t pad1;
 		uint32_t pad2;
 	};
@@ -394,6 +395,7 @@ public:
 	RID get_cluster_buffer() const;
 	uint32_t get_cluster_size() const;
 	uint32_t get_max_cluster_elements() const;
+	uint32_t get_cluster_buffer_validation_offset() const;
 
 	void set_shared(ClusterBuilderSharedDataRD *p_shared);
 

@@ -10,11 +10,11 @@ layout(push_constant, std430) uniform Params {
 	uint cluster_render_data_size; // how much data for a single cluster takes
 	uint max_render_element_count_div_32; //divided by 32
 	uvec2 cluster_screen_size;
-	uint render_element_count_div_32; //divided by 32
 
+	uint render_element_count_div_32; //divided by 32
 	uint max_cluster_element_count_div_32; //divided by 32
-	uint pad1;
-	uint pad2;
+	uint cluster_buffer_validation_offset;
+	uint cluster_render_validation_offset;
 }
 params;
 
@@ -23,10 +23,26 @@ layout(set = 0, binding = 1, std430) buffer restrict readonly ClusterRender {
 }
 cluster_render;
 
+uint get_cluster_render_data(uint index) {
+	uint validation_offset = params.cluster_render_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1FU);
+	bool validation_bit_enabled = (cluster_render.data[validation_offset] & validation_mask) != 0U;
+	return validation_bit_enabled ? cluster_render.data[index] : 0U;
+}
+
 layout(set = 0, binding = 2, std430) buffer restrict ClusterStore {
 	uint data[];
 }
 cluster_store;
+
+void check_cluster_store_validity(uint index) {
+	uint validation_offset = params.cluster_buffer_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1F);
+	if ((cluster_store.data[validation_offset] & validation_mask) == 0U) {
+		cluster_store.data[index] = 0U;
+		cluster_store.data[validation_offset] |= validation_mask;
+	}
+}
 
 struct RenderElement {
 	uint type; //0-4
@@ -59,7 +75,7 @@ void main() {
 
 	//check all render_elements and see which one was written to
 	while (render_element_offset < params.render_element_count_div_32) {
-		uint bits = cluster_render.data[src_offset + render_element_offset];
+		uint bits = get_cluster_render_data(src_offset + render_element_offset);
 		while (bits != 0) {
 			//if bits exist, check the render_element
 			uint index_bit = findLSB(bits);
@@ -67,7 +83,7 @@ void main() {
 			uint type = render_elements.data[index].type;
 
 			uint z_range_offset = src_offset + params.max_render_element_count_div_32 + index;
-			uint z_range = cluster_render.data[z_range_offset];
+			uint z_range = get_cluster_render_data(z_range_offset);
 
 			//if object was written, z was written, but check just in case
 			if (z_range != 0) { //should always be > 0
@@ -90,6 +106,7 @@ void main() {
 				//store this index in the Z slices by setting the relevant bit
 				for (uint i = from_z; i < to_z; i++) {
 					uint slice_ofs = dst_offset + params.max_cluster_element_count_div_32 + i;
+					check_cluster_store_validity(slice_ofs);
 
 					uint minmax = cluster_store.data[slice_ofs];
 
@@ -108,7 +125,9 @@ void main() {
 				uint store_bit = orig_index & 0x1F;
 
 				//store the actual render_element index at the end, so the rendering code can reference it
-				cluster_store.data[dst_offset + store_word] |= 1 << store_bit;
+				uint store_ofs = dst_offset + store_word;
+				check_cluster_store_validity(store_ofs);
+				cluster_store.data[store_ofs] |= 1 << store_bit;
 			}
 
 			bits &= ~(1 << index_bit); //clear the bit to continue iterating

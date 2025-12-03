@@ -293,12 +293,12 @@ private:
 			uint32_t ss_effects_flags;
 			float ssao_light_affect;
 			float ssao_ao_affect;
-			uint32_t pad1;
+			uint32_t cluster_buffer_validation_offset;
 
 			float sdf_to_bounds[16];
 
 			int32_t sdf_offset[3];
-			uint32_t pad2;
+			uint32_t sdf_offset_pad;
 
 			int32_t sdf_size[3];
 			uint32_t gi_upscale_for_msaa;

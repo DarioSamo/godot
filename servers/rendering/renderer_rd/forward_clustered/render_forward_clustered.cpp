@@ -700,6 +700,7 @@ void RenderForwardClustered::_setup_environment(const RenderDataRD *p_render_dat
 
 	scene_state.ubo.cluster_shift = get_shift_from_power_of_2(p_render_data->cluster_size);
 	scene_state.ubo.max_cluster_element_count_div_32 = p_render_data->cluster_max_elements / 32;
+	scene_state.ubo.cluster_buffer_validation_offset = p_render_data->cluster_buffer_validation_offset;
 	{
 		uint32_t cluster_screen_width = Math::division_round_up((uint32_t)p_screen_size.width, p_render_data->cluster_size);
 		uint32_t cluster_screen_height = Math::division_round_up((uint32_t)p_screen_size.height, p_render_data->cluster_size);
@@ -1715,6 +1716,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	p_render_data->cluster_buffer = current_cluster_builder->get_cluster_buffer();
 	p_render_data->cluster_size = current_cluster_builder->get_cluster_size();
 	p_render_data->cluster_max_elements = current_cluster_builder->get_max_cluster_elements();
+	p_render_data->cluster_buffer_validation_offset = current_cluster_builder->get_cluster_buffer_validation_offset();
 
 	_update_vrs(rb);
 
@@ -2762,6 +2764,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	render_data.scene_data = &scene_data;
 	render_data.cluster_size = 1;
 	render_data.cluster_max_elements = 32;
+	render_data.cluster_buffer_validation_offset = 0;
 	render_data.instances = &p_instances;
 	render_data.render_info = p_render_info;
 
@@ -2855,6 +2858,7 @@ void RenderForwardClustered::_render_particle_collider_heightfield(RID p_fb, con
 	render_data.scene_data = &scene_data;
 	render_data.cluster_size = 1;
 	render_data.cluster_max_elements = 32;
+	render_data.cluster_buffer_validation_offset = 0;
 	render_data.instances = &p_instances;
 
 	_update_render_base_uniform_set();
@@ -2900,6 +2904,7 @@ void RenderForwardClustered::_render_material(const Transform3D &p_cam_transform
 	render_data.scene_data = &scene_data;
 	render_data.cluster_size = 1;
 	render_data.cluster_max_elements = 32;
+	render_data.cluster_buffer_validation_offset = 0;
 	render_data.instances = &p_instances;
 
 	scene_shader.enable_advanced_shader_group();
@@ -2951,6 +2956,7 @@ void RenderForwardClustered::_render_uv2(const PagedArray<RenderGeometryInstance
 	render_data.scene_data = &scene_data;
 	render_data.cluster_size = 1;
 	render_data.cluster_max_elements = 32;
+	render_data.cluster_buffer_validation_offset = 0;
 	render_data.instances = &p_instances;
 
 	scene_shader.enable_advanced_shader_group();
@@ -3022,6 +3028,7 @@ void RenderForwardClustered::_render_sdfgi(Ref<RenderSceneBuffersRD> p_render_bu
 	render_data.scene_data = &scene_data;
 	render_data.cluster_size = 1;
 	render_data.cluster_max_elements = 32;
+	render_data.cluster_buffer_validation_offset = 0;
 	render_data.instances = &p_instances;
 
 	_update_render_base_uniform_set();

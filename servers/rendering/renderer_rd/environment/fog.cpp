@@ -1122,6 +1122,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 		params.max_cluster_element_count_div_32 = p_settings.max_cluster_elements / 32;
 		params.cluster_type_size = cluster_screen_width * cluster_screen_height * (params.max_cluster_element_count_div_32 + 32);
 		params.cluster_width = cluster_screen_width;
+		params.cluster_buffer_validation_offset = p_settings.cluster_builder->get_cluster_buffer_validation_offset();
 
 		params.screen_size[0] = p_settings.rb_size.x;
 		params.screen_size[1] = p_settings.rb_size.y;

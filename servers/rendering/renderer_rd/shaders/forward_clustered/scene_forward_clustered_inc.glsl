@@ -289,12 +289,12 @@ struct ImplementationData {
 	uint ss_effects_flags;
 	float ssao_light_affect;
 	float ssao_ao_affect;
-	uint pad1;
+	uint cluster_buffer_validation_offset;
 
 	mat4 sdf_to_bounds;
 
 	ivec3 sdf_offset;
-	uint pad2;
+	uint sdf_offset_pad;
 
 	ivec3 sdf_size;
 	bool gi_upscale_for_msaa;

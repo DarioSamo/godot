@@ -172,9 +172,14 @@ layout(set = 0, binding = 14, std140) uniform Params {
 	uint cluster_width;
 
 	uint max_cluster_element_count_div_32;
+	uint cluster_buffer_validation_offset;
 	bool use_temporal_reprojection;
 	uint temporal_frame;
+
 	float temporal_blend;
+	uint pad1;
+	uint pad2;
+	uint pad3;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -230,8 +235,15 @@ float get_omni_attenuation(float dist, float inv_range, float decay) {
 	return nd * pow(max(dist, 0.0001), -decay);
 }
 
+uint get_cluster_data(uint index) {
+	uint validation_offset = params.cluster_buffer_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1FU);
+	bool validation_bit_enabled = (cluster_buffer.data[validation_offset] & validation_mask) != 0U;
+	return validation_bit_enabled ? cluster_buffer.data[index] : 0U;
+}
+
 void cluster_get_item_range(uint p_offset, out uint item_min, out uint item_max, out uint item_from, out uint item_to) {
-	uint item_min_max = cluster_buffer.data[p_offset];
+	uint item_min_max = get_cluster_data(p_offset);
 	item_min = item_min_max & 0xFFFF;
 	item_max = item_min_max >> 16;
 
@@ -455,7 +467,7 @@ void main() {
 			cluster_get_item_range(cluster_omni_offset + params.max_cluster_element_count_div_32 + cluster_z, item_min, item_max, item_from, item_to);
 
 			for (uint i = item_from; i < item_to; i++) {
-				uint mask = cluster_buffer.data[cluster_omni_offset + i];
+				uint mask = get_cluster_data(cluster_omni_offset + i);
 				mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 				uint merged_mask = mask;
 
@@ -522,7 +534,7 @@ void main() {
 			cluster_get_item_range(cluster_spot_offset + params.max_cluster_element_count_div_32 + cluster_z, item_min, item_max, item_from, item_to);
 
 			for (uint i = item_from; i < item_to; i++) {
-				uint mask = cluster_buffer.data[cluster_spot_offset + i];
+				uint mask = get_cluster_data(cluster_spot_offset + i);
 				mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 				uint merged_mask = mask;
 

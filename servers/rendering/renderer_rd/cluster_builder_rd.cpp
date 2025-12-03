@@ -308,9 +308,11 @@ void ClusterBuilderRD::_clear() {
 
 	RD::get_singleton()->free(cluster_buffer);
 	RD::get_singleton()->free(cluster_render_buffer);
+	RD::get_singleton()->free(cluster_render_mutex_buffer);
 	RD::get_singleton()->free(element_buffer);
 	cluster_buffer = RID();
 	cluster_render_buffer = RID();
+	cluster_render_mutex_buffer = RID();
 	element_buffer = RID();
 
 	memfree(render_elements);
@@ -343,17 +345,31 @@ void ClusterBuilderRD::setup(Size2i p_screen_size, uint32_t p_max_elements, RID 
 		max_elements_by_type += 32 - (max_elements_by_type % 32);
 	}
 
-	cluster_buffer_size = cluster_screen_size.x * cluster_screen_size.y * (max_elements_by_type / 32 + 32) * ELEMENT_TYPE_MAX * 4;
+	// Both cluster buffers add extra numbers towards the end of the buffer to act as a validation bitmap to indicate
+	// whether the value corresponds to the current frame or the previous frame.
+	uint32_t cluster_uint_count = cluster_screen_size.x * cluster_screen_size.y * (max_elements_by_type / 32 + 32) * ELEMENT_TYPE_MAX;
+	cluster_buffer_validation_offset = cluster_uint_count;
+	cluster_buffer_validation_size = ((cluster_uint_count + 31) / 32);
 
 	render_element_max = max_elements_by_type * ELEMENT_TYPE_MAX;
 
 	uint32_t element_tag_bits_size = render_element_max / 32;
 	uint32_t element_tag_depth_bits_size = render_element_max;
 
-	cluster_render_buffer_size = cluster_screen_size.x * cluster_screen_size.y * (element_tag_bits_size + element_tag_depth_bits_size) * 4; // Tag bits (element was used) and tag depth (depth range in which it was used).
+	uint32_t cluster_render_uint_count = cluster_screen_size.x * cluster_screen_size.y * (element_tag_bits_size + element_tag_depth_bits_size); // Tag bits (element was used) and tag depth (depth range in which it was used).
+	cluster_render_validation_offset = cluster_render_uint_count;
+	cluster_render_validation_size = ((cluster_render_uint_count + 31) / 32);
 
+	uint32_t cluster_buffer_size = (cluster_uint_count + cluster_buffer_validation_size) * 4;
+	uint32_t cluster_render_buffer_size = (cluster_render_uint_count + cluster_render_validation_size) * 4;
+	uint32_t cluster_render_mutex_buffer_size = cluster_render_validation_size * 4;
 	cluster_render_buffer = RD::get_singleton()->storage_buffer_create(cluster_render_buffer_size);
+	cluster_render_mutex_buffer = RD::get_singleton()->storage_buffer_create(cluster_render_mutex_buffer_size);
 	cluster_buffer = RD::get_singleton()->storage_buffer_create(cluster_buffer_size);
+
+	RD::get_singleton()->buffer_clear(cluster_render_buffer, 0, cluster_render_buffer_size);
+	RD::get_singleton()->buffer_clear(cluster_render_mutex_buffer, 0, cluster_render_mutex_buffer_size);
+	RD::get_singleton()->buffer_clear(cluster_buffer, 0, cluster_buffer_size);
 
 	render_elements = static_cast<RenderElementData *>(memalloc(sizeof(RenderElementData) * render_element_max));
 	render_element_count = 0;
@@ -388,6 +404,13 @@ void ClusterBuilderRD::setup(Size2i p_screen_size, uint32_t p_max_elements, RID 
 			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 			u.binding = 3;
 			u.append_id(cluster_render_buffer);
+			uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 4;
+			u.append_id(cluster_render_mutex_buffer);
 			uniforms.push_back(u);
 		}
 
@@ -488,12 +511,11 @@ void ClusterBuilderRD::bake_cluster() {
 
 	RD::get_singleton()->draw_command_begin_label("Bake Light Cluster");
 
-	// Clear cluster buffer.
-	RD::get_singleton()->buffer_clear(cluster_buffer, 0, cluster_buffer_size);
+	// Only clear the validation bits on each cluster buffer.
+	RD::get_singleton()->buffer_clear(cluster_buffer, cluster_buffer_validation_offset * 4, cluster_buffer_validation_size * 4);
 
 	if (render_element_count > 0) {
-		// Clear render buffer.
-		RD::get_singleton()->buffer_clear(cluster_render_buffer, 0, cluster_render_buffer_size);
+		RD::get_singleton()->buffer_clear(cluster_render_buffer, cluster_render_validation_offset * 4, cluster_render_validation_size * 4);
 
 		{ // Fill state uniform.
 
@@ -507,6 +529,7 @@ void ClusterBuilderRD::bake_cluster() {
 			state.cluster_screen_width = cluster_screen_size.x;
 			state.cluster_depth_offset = (render_element_max / 32);
 			state.cluster_data_size = state.cluster_depth_offset + render_element_max;
+			state.cluster_render_validation_offset = cluster_render_validation_offset;
 
 			RD::get_singleton()->buffer_update(state_uniform, 0, sizeof(StateUniform), &state);
 		}
@@ -575,8 +598,8 @@ void ClusterBuilderRD::bake_cluster() {
 
 			push_constant.render_element_count_div_32 = Math::division_round_up(render_element_count, 32U);
 			push_constant.max_cluster_element_count_div_32 = max_elements_by_type / 32;
-			push_constant.pad1 = 0;
-			push_constant.pad2 = 0;
+			push_constant.cluster_buffer_validation_offset = cluster_buffer_validation_offset;
+			push_constant.cluster_render_validation_offset = cluster_render_validation_offset;
 
 			RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(ClusterBuilderSharedDataRD::ClusterStore::PushConstant));
 
@@ -606,6 +629,7 @@ void ClusterBuilderRD::debug(ElementType p_element) {
 	push_constant.z_far = z_far;
 	push_constant.z_near = z_near;
 	push_constant.max_cluster_element_count_div_32 = max_elements_by_type / 32;
+	push_constant.cluster_buffer_validation_offset = cluster_buffer_validation_offset;
 
 	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(ClusterBuilderSharedDataRD::ClusterDebug::PushConstant));
 
@@ -624,6 +648,10 @@ uint32_t ClusterBuilderRD::get_cluster_size() const {
 
 uint32_t ClusterBuilderRD::get_max_cluster_elements() const {
 	return max_elements_by_type;
+}
+
+uint32_t ClusterBuilderRD::get_cluster_buffer_validation_offset() const {
+	return cluster_buffer_validation_offset;
 }
 
 void ClusterBuilderRD::set_shared(ClusterBuilderSharedDataRD *p_shared) {

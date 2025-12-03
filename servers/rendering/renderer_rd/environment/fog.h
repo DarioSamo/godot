@@ -177,9 +177,14 @@ private:
 			uint32_t cluster_width;
 
 			uint32_t max_cluster_element_count_div_32;
-			uint32_t use_temporal_reprojection;
+			uint32_t cluster_buffer_validation_offset;
+			bool use_temporal_reprojection;
 			uint32_t temporal_frame;
+
 			float temporal_blend;
+			uint32_t pad1;
+			uint32_t pad2;
+			uint32_t pad3;
 
 			float cam_rotation[12];
 			float to_prev_view[16];

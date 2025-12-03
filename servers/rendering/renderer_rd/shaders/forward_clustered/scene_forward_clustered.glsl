@@ -163,8 +163,15 @@ layout(location = 13) out vec4 specular_light_interp;
 
 #include "../scene_forward_vertex_lights_inc.glsl"
 
+uint get_cluster_data(uint index) {
+	uint validation_offset = implementation_data.cluster_buffer_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1FU);
+	bool validation_bit_enabled = (cluster_buffer.data[validation_offset] & validation_mask) != 0U;
+	return validation_bit_enabled ? cluster_buffer.data[index] : 0U;
+}
+
 void cluster_get_item_range(uint p_offset, out uint item_min, out uint item_max, out uint item_from, out uint item_to) {
-	uint item_min_max = cluster_buffer.data[p_offset];
+	uint item_min_max = get_cluster_data(p_offset);
 	item_min = item_min_max & 0xFFFFu;
 	item_max = item_min_max >> 16;
 
@@ -545,7 +552,7 @@ void vertex_shader(vec3 vertex_input,
 		cluster_get_item_range(cluster_omni_offset + implementation_data.max_cluster_element_count_div_32 + cluster_z, item_min, item_max, item_from, item_to);
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_omni_offset + i];
+			uint mask = get_cluster_data(cluster_omni_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 			uint merged_mask = mask;
 
@@ -579,7 +586,7 @@ void vertex_shader(vec3 vertex_input,
 		cluster_get_item_range(cluster_spot_offset + implementation_data.max_cluster_element_count_div_32 + cluster_z, item_min, item_max, item_from, item_to);
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_spot_offset + i];
+			uint mask = get_cluster_data(cluster_spot_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 			uint merged_mask = mask;
 
@@ -1095,8 +1102,15 @@ vec4 fog_process(vec3 vertex) {
 	return vec4(fog_color, fog_amount);
 }
 
+uint get_cluster_data(uint index) {
+	uint validation_offset = implementation_data.cluster_buffer_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1FU);
+	bool validation_bit_enabled = (cluster_buffer.data[validation_offset] & validation_mask) != 0U;
+	return validation_bit_enabled ? cluster_buffer.data[index] : 0U;
+}
+
 void cluster_get_item_range(uint p_offset, out uint item_min, out uint item_max, out uint item_from, out uint item_to) {
-	uint item_min_max = cluster_buffer.data[p_offset];
+	uint item_min_max = get_cluster_data(p_offset);
 	item_min = item_min_max & 0xFFFFu;
 	item_max = item_min_max >> 16;
 
@@ -1474,7 +1488,7 @@ void fragment_shader(in SceneData scene_data) {
 		item_to = subgroupBroadcastFirst(subgroupMax(item_to));
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_decal_offset + i];
+			uint mask = get_cluster_data(cluster_decal_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 
 			uint merged_mask = subgroupBroadcastFirst(subgroupOr(mask));
@@ -1960,7 +1974,7 @@ void fragment_shader(in SceneData scene_data) {
 		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_reflection_offset + i];
+			uint mask = get_cluster_data(cluster_reflection_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 
 			uint merged_mask = subgroupBroadcastFirst(subgroupOr(mask));
@@ -2520,7 +2534,7 @@ void fragment_shader(in SceneData scene_data) {
 		item_to = subgroupBroadcastFirst(subgroupMax(item_to));
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_omni_offset + i];
+			uint mask = get_cluster_data(cluster_omni_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 
 			uint merged_mask = subgroupBroadcastFirst(subgroupOr(mask));
@@ -2581,7 +2595,7 @@ void fragment_shader(in SceneData scene_data) {
 		item_to = subgroupBroadcastFirst(subgroupMax(item_to));
 
 		for (uint i = item_from; i < item_to; i++) {
-			uint mask = cluster_buffer.data[cluster_spot_offset + i];
+			uint mask = get_cluster_data(cluster_spot_offset + i);
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
 
 			uint merged_mask = subgroupBroadcastFirst(subgroupOr(mask));

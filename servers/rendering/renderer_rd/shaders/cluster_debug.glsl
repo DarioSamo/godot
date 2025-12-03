@@ -51,15 +51,22 @@ layout(push_constant, std430) uniform Params {
 
 	bool orthogonal;
 	uint max_cluster_element_count_div_32;
-	uint pad1;
-	uint pad2;
+	uint cluster_buffer_validation_offset;
+	uint pad;
 }
 params;
 
 layout(set = 0, binding = 1, std430) buffer restrict readonly ClusterData {
 	uint data[];
 }
-cluster_data;
+cluster_buffer;
+
+uint get_cluster_data(uint index) {
+	uint validation_offset = params.cluster_buffer_validation_offset + (index >> 5U);
+	uint validation_mask = 1U << (index & 0x1FU);
+	bool validation_bit_enabled = (cluster_buffer.data[validation_offset] & validation_mask) != 0U;
+	return validation_bit_enabled ? cluster_buffer.data[index] : 0U;
+}
 
 layout(rgba16f, set = 0, binding = 2) uniform restrict writeonly image2D screen_buffer;
 layout(set = 0, binding = 3) uniform texture2D depth_buffer;
@@ -88,13 +95,13 @@ void main() {
 	depth /= params.z_far;
 
 	uint slice = uint(clamp(floor(depth * 32.0), 0.0, 31.0));
-	uint slice_minmax = cluster_data.data[offset + params.max_cluster_element_count_div_32 + slice];
+	uint slice_minmax = get_cluster_data(offset + params.max_cluster_element_count_div_32 + slice);
 	uint item_min = slice_minmax & 0xFFFF;
 	uint item_max = slice_minmax >> 16;
 
 	uint item_count = 0;
 	for (uint i = 0; i < params.max_cluster_element_count_div_32; i++) {
-		uint slice_bits = cluster_data.data[offset + i];
+		uint slice_bits = get_cluster_data(offset + i);
 		while (slice_bits != 0) {
 			uint bit = findLSB(slice_bits);
 			uint item = i * 32 + bit;

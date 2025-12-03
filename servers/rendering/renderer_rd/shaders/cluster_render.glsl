@@ -11,9 +11,9 @@ layout(location = 1) out flat uint element_index;
 
 layout(push_constant, std430) uniform Params {
 	uint base_index;
-	uint pad0;
 	uint pad1;
 	uint pad2;
+	uint pad3;
 }
 params;
 
@@ -26,8 +26,8 @@ layout(set = 0, binding = 1, std140) uniform State {
 	uint cluster_data_size; // how much data for a single cluster takes
 
 	uint cluster_depth_offset;
-	uint pad0;
-	uint pad1;
+	uint cluster_buffer_validation_offset;
+	uint cluster_render_validation_offset;
 	uint pad2;
 }
 state;
@@ -72,6 +72,14 @@ void main() {
 layout(location = 0) in float depth_interp;
 layout(location = 1) in flat uint element_index;
 
+layout(push_constant, std430) uniform Params {
+	uint base_index;
+	uint pad1;
+	uint pad2;
+	uint pad3;
+}
+params;
+
 layout(set = 0, binding = 1, std140) uniform State {
 	mat4 projection;
 	float inv_z_far;
@@ -79,7 +87,7 @@ layout(set = 0, binding = 1, std140) uniform State {
 	uint cluster_screen_width; //
 	uint cluster_data_size; // how much data for a single cluster takes
 	uint cluster_depth_offset;
-	uint pad0;
+	uint cluster_render_validation_offset;
 	uint pad1;
 	uint pad2;
 }
@@ -93,6 +101,29 @@ layout(set = 0, binding = 3, std430) buffer restrict ClusterRender {
 	uint data[];
 }
 cluster_render;
+
+layout(set = 0, binding = 4, std430) buffer restrict ClusterMutex {
+	uint data[];
+}
+cluster_mutex;
+
+void check_cluster_render_validity(uint index) {
+	// FIXME: The need for this spinlock basically negates the performance benefit of being able to skip the copies. Some other method must be figured out for this.
+	uint validation_offset = state.cluster_render_validation_offset + (index >> 5U);
+	uint mutex_offset = index >> 5U;
+	uint validation_mask = 1U << (index & 0x1F);
+	bool keep_waiting = true;
+	while (keep_waiting) {
+		if (atomicCompSwap(cluster_mutex.data[mutex_offset], 0U, 1U) == 0U) {
+			if ((atomicOr(cluster_render.data[validation_offset], validation_mask) & validation_mask) == 0U) {
+				atomicOr(cluster_render.data[index], 0U);
+			}
+
+			atomicExchange(cluster_mutex.data[mutex_offset], 0U);
+			keep_waiting = false;
+		}
+	}
+}
 
 #ifdef USE_ATTACHMENT
 layout(location = 0) out vec4 frag_color;
@@ -139,6 +170,7 @@ void main() {
 		cluster_thread_group_index = subgroupBallotExclusiveBitCount(mask);
 
 		if (cluster_thread_group_index == 0) {
+			check_cluster_render_validity(usage_write_offset);
 			aux = atomicOr(cluster_render.data[usage_write_offset], usage_write_bit);
 		}
 	}
@@ -158,6 +190,7 @@ void main() {
 #endif
 		z_write_bit = subgroupOr(z_write_bit); //merge all Zs
 		if (cluster_thread_group_index == 0) {
+			check_cluster_render_validity(z_write_offset);
 			aux = atomicOr(cluster_render.data[z_write_offset], z_write_bit);
 		}
 	}
