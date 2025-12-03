@@ -456,26 +456,29 @@ void generate_SSAO_shadows_internal(out float r_shadow_term, out vec4 r_edges, o
 	r_weight = weight_sum;
 }
 
+#include "../swizzled_thread_tiling_inc.glsl"
+
 void main() {
 	float out_shadow_term;
 	float out_weight;
 	vec4 out_edges;
-	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	uvec2 invocation_id = swizzled_global_invocation_id();
+	ivec2 ssC = ivec2(invocation_id.xy);
 	if (any(greaterThanEqual(ssC, params.screen_size))) { //too large, do nothing
 		return;
 	}
 
-	vec2 uv = vec2(gl_GlobalInvocationID) + vec2(0.5);
+	vec2 uv = vec2(invocation_id) + vec2(0.5);
 #ifdef SSAO_BASE
 	generate_SSAO_shadows_internal(out_shadow_term, out_edges, out_weight, uv, params.quality, true);
 
-	imageStore(dest_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_shadow_term, out_weight / (float(SSAO_ADAPTIVE_TAP_BASE_COUNT) * 4.0), 0.0, 0.0));
+	imageStore(dest_image, ivec2(invocation_id.xy), vec4(out_shadow_term, out_weight / (float(SSAO_ADAPTIVE_TAP_BASE_COUNT) * 4.0), 0.0, 0.0));
 #else
 	generate_SSAO_shadows_internal(out_shadow_term, out_edges, out_weight, uv, params.quality, false); // pass in quality levels
 	if (params.quality == 0) {
 		out_edges = vec4(1.0);
 	}
 
-	imageStore(dest_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_shadow_term, pack_edges(out_edges), 0.0, 0.0));
+	imageStore(dest_image, ivec2(invocation_id.xy), vec4(out_shadow_term, pack_edges(out_edges), 0.0, 0.0));
 #endif
 }

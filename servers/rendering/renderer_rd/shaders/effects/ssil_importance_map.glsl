@@ -47,9 +47,11 @@ layout(push_constant, std430) uniform Params {
 }
 params;
 
+#include "../swizzled_thread_tiling_inc.glsl"
+
 void main() {
 	// Pixel being shaded
-	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 ssC = ivec2(swizzled_global_invocation_id());
 
 #ifdef GENERATE_MAP
 	// importance map stuff

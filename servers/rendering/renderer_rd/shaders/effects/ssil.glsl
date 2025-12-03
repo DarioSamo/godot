@@ -415,17 +415,20 @@ void generate_SSIL(out vec3 r_color, out vec4 r_edges, out float r_obscurance, o
 	r_weight = weight_sum;
 }
 
+#include "../swizzled_thread_tiling_inc.glsl"
+
 void main() {
 	vec3 out_color;
 	float out_obscurance;
 	float out_weight;
 	vec4 out_edges;
-	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	uvec2 invocation_id = swizzled_global_invocation_id();
+	ivec2 ssC = ivec2(invocation_id);
 	if (any(greaterThanEqual(ssC, params.screen_size))) { //too large, do nothing
 		return;
 	}
 
-	vec2 uv = vec2(gl_GlobalInvocationID) + vec2(0.5);
+	vec2 uv = vec2(invocation_id) + vec2(0.5);
 #ifdef SSIL_BASE
 	generate_SSIL(out_color, out_edges, out_obscurance, out_weight, uv, params.quality, true);
 

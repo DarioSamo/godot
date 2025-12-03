@@ -114,15 +114,18 @@ vec4 sample_blurred(ivec2 p_pos, vec2 p_coord) {
 }
 #endif
 
+#include "../swizzled_thread_tiling_inc.glsl"
+
 void main() {
 	// Pixel being shaded
-	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	uvec2 invocation_id = swizzled_global_invocation_id();
+	ivec2 ssC = ivec2(invocation_id);
 
 #ifdef MODE_NON_SMART
 
 	vec2 half_pixel = params.half_screen_pixel_size * 0.5;
 
-	vec2 uv = (vec2(gl_GlobalInvocationID.xy) + vec2(0.5, 0.5)) * params.half_screen_pixel_size;
+	vec2 uv = (vec2(invocation_id) + vec2(0.5, 0.5)) * params.half_screen_pixel_size;
 
 	vec4 center = textureLod(source_ssil, uv, 0.0);
 
@@ -135,9 +138,9 @@ void main() {
 
 #else
 #ifdef MODE_SMART
-	vec4 sampled = sample_blurred(ssC, (vec2(gl_GlobalInvocationID.xy) + vec2(0.5, 0.5)) * params.half_screen_pixel_size);
+	vec4 sampled = sample_blurred(ssC, (vec2(invocation_id) + vec2(0.5, 0.5)) * params.half_screen_pixel_size);
 #else // MODE_WIDE
-	vec4 sampled = sample_blurred_wide(ssC, (vec2(gl_GlobalInvocationID.xy) + vec2(0.5, 0.5)) * params.half_screen_pixel_size);
+	vec4 sampled = sample_blurred_wide(ssC, (vec2(invocation_id) + vec2(0.5, 0.5)) * params.half_screen_pixel_size);
 #endif
 #endif // MODE_NON_SMART
 	imageStore(dest_image, ssC, sampled);
