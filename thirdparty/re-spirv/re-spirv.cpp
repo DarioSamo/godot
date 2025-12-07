@@ -759,6 +759,7 @@ namespace respv {
         phis.clear();
         loopHeaders.clear();
         listNodes.clear();
+        defaultSwitchOpConstantInt = UINT32_MAX;
     }
 
     constexpr uint32_t SpvStartWordIndex = 5;
@@ -997,7 +998,7 @@ namespace respv {
                 break;
             case SpvOpDecorate: {
                 uint32_t resultId = dataWords[parseWordIndex + 1];
-                if (resultId > dataIdBound) {
+                if (resultId >= dataIdBound) {
                     fprintf(stderr, "Found decoration with invalid result %u.\n", resultId);
                     return false;
                 }
@@ -1012,7 +1013,7 @@ namespace respv {
                 if (currentFunction.resultId != UINT32_MAX) {
                     // Identify the variable as a local function variable.
                     uint32_t resultId = dataWords[parseWordIndex + 2];
-                    if (resultId > dataIdBound) {
+                    if (resultId >= dataIdBound) {
                         fprintf(stderr, "Found variable with invalid result %u.\n", resultId);
                         return false;
                     }
@@ -1633,7 +1634,13 @@ namespace respv {
                 // Ignore load operations with memory operands.
                 if (wordCount == 4) {
                     uint32_t pointerId = dataWords[callStack.back().wordIndex + 3];
-                    if ((functionResultMap[pointerId].wordIndex != UINT32_MAX) && (storeMap[pointerId] < dataIdBound)) {
+                    if (pointerId >= dataIdBound) {
+                        fprintf(stderr, "Found load operation with invalid pointer %u.\n", pointerId);
+                        return false;
+                    }
+
+                    uint32_t pointerWordIndex = functionResultMap[pointerId].wordIndex;
+                    if ((pointerWordIndex != UINT32_MAX) && (SpvOp(dataWords[pointerWordIndex] & 0xFFFFU) == SpvOpVariable) && (storeMap[pointerId] < dataIdBound)) {
                         uint32_t resultId = dataWords[callStack.back().wordIndex + 2];
                         if (loadMap[resultId] != storeMap[pointerId]) {
                             loadMap[resultId] = storeMap[pointerId];
@@ -1649,7 +1656,17 @@ namespace respv {
                 // Ignore store operations with memory operands.
                 if (wordCount == 3) {
                     uint32_t pointerId = dataWords[callStack.back().wordIndex + 1];
+                    if (pointerId >= dataIdBound) {
+                        fprintf(stderr, "Found store operation with invalid pointer %u.\n", pointerId);
+                        return false;
+                    }
+
                     uint32_t resultId = dataWords[callStack.back().wordIndex + 2];
+                    if (resultId >= dataIdBound) {
+                        fprintf(stderr, "Found store operation with invalid result %u.\n", resultId);
+                        return false;
+                    }
+
                     if (storeMap[pointerId] != resultId) {
                         storeMap[pointerId] = resultId;
                         storeMapChanges.emplace_back(pointerId);
@@ -2194,20 +2211,24 @@ namespace respv {
         extSpirvWordCount = pSize / sizeof(uint32_t);
 
         if (pInlineFunctions && !inlineData(pData, pSize)) {
+            clear();
             return false;
         }
 
         const void *data = pInlineFunctions ? inlinedSpirvWords.data() : pData;
         const size_t size = pInlineFunctions ? (inlinedSpirvWords.size() * sizeof(uint32_t)) : pSize;
         if (!parseData(data, size)) {
+            clear();
             return false;
         }
 
         if (!process(data, size)) {
+            clear();
             return false;
         }
 
         if (!sort(data, size)) {
+            clear();
             return false;
         }
 
@@ -2215,7 +2236,7 @@ namespace respv {
     }
 
     bool Shader::empty() const {
-        return false;
+        return inlinedSpirvWords.empty() && ((extSpirvWords == nullptr) || (extSpirvWordCount == 0));
     }
 
     // Optimizer
