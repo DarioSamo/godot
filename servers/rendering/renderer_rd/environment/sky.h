@@ -134,7 +134,7 @@ private:
 		virtual ~SkyShaderData();
 	};
 
-	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size = 0.0);
+	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size);
 
 public:
 	struct SkySceneState {
@@ -276,7 +276,7 @@ public:
 
 		void free();
 
-		RID get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, Ref<RenderSceneBuffersRD> p_render_buffers);
+		RID get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment_for_tonemapping);
 		bool set_radiance_size(int p_radiance_size);
 		int get_radiance_size() const;
 		bool set_mode(RS::SkyMode p_mode);
@@ -305,7 +305,7 @@ public:
 	void setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size);
 	void update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, const Vector3 &p_global_pos, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 	void update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
-	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
+	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier, float p_brightness_multiplier);
 
 	void invalidate_sky(Sky *p_sky);
 	void update_dirty_skys();

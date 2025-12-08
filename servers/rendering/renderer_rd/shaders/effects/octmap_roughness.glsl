@@ -18,7 +18,6 @@ layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_oc
 void main() {
 	uvec2 id = gl_GlobalInvocationID.xy;
 	if (id.x < params.dest_size && id.y < params.dest_size) {
-		vec2 inv_source_size = 1.0 / vec2(params.source_size);
 		vec2 inv_dest_size = 1.0 / vec2(params.dest_size);
 		vec2 uv = (vec2(id.xy) + 0.5) * inv_dest_size;
 		if (params.use_direct_write) {

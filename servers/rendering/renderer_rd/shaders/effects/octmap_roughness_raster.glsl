@@ -37,10 +37,9 @@ void main() {
 	if (params.use_direct_write) {
 		frag_color = vec4(texture(source_oct, uv_interp).rgb, 1.0);
 	} else {
-		vec2 inv_size = 1.0 / vec2(params.size);
 		vec3 N = oct_to_vec3_with_border(uv_interp, params.border_size.y);
 		vec4 sum = vec4(0.0, 0.0, 0.0, 0.0);
-		float solid_angle_texel = 4.0 * M_PI / (params.size * params.size);
+		float solid_angle_texel = 4.0 * M_PI / (params.dest_size * params.dest_size);
 		float roughness2 = params.roughness * params.roughness;
 		float roughness4 = roughness2 * roughness2;
 		vec3 UpVector = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);

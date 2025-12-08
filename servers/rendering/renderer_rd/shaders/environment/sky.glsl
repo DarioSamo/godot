@@ -78,8 +78,8 @@ layout(set = 0, binding = 2, std140) uniform SkySceneData {
 
 	float z_far; // 4 - 52
 	uint directional_light_count; // 4 - 56
-	uint pad1; // 4 - 60
-	uint pad2; // 4 - 64
+	float tonemapper_exposure; // 4 - 60
+	uint pad1; // 4 - 64
 }
 sky_scene_data;
 

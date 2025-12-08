@@ -741,7 +741,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		tonemap.use_color_correction = false;
 		tonemap.use_1d_color_correction = false;
 		tonemap.color_correction_texture = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
-		tonemap.convert_to_srgb = !using_hdr;
+		tonemap.convert_to_srgb = false; //!using_hdr;
 
 		if (can_use_effects && p_render_data->environment.is_valid()) {
 			tonemap.use_bcs = environment_get_adjustments_enabled(p_render_data->environment);
@@ -931,7 +931,7 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 	tonemap.use_color_correction = false;
 	tonemap.use_1d_color_correction = false;
 	tonemap.color_correction_texture = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
-	tonemap.convert_to_srgb = !using_hdr;
+	tonemap.convert_to_srgb = false; //!using_hdr;
 
 	if (can_use_effects && p_render_data->environment.is_valid()) {
 		tonemap.use_bcs = environment_get_adjustments_enabled(p_render_data->environment);
@@ -1734,7 +1734,7 @@ void RendererSceneRenderRD::init() {
 		raster_effects.set_flag(RendererRD::CopyEffects::RASTER_EFFECT_GAUSSIAN_BLUR);
 
 		// This path can be used in the future to redirect certain devices to use the raster version of the effect, either due to performance or driver errors.
-		bool use_raster_for_octmaps = false;
+		bool use_raster_for_octmaps = true;
 		if (use_raster_for_octmaps) {
 			raster_effects.set_flag(RendererRD::CopyEffects::RASTER_EFFECT_OCTMAP);
 		}

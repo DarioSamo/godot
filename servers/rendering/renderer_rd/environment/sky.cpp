@@ -520,8 +520,10 @@ void SkyRD::Sky::free() {
 	}
 }
 
-RID SkyRD::Sky::get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, Ref<RenderSceneBuffersRD> p_render_buffers) {
+RID SkyRD::Sky::get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment_for_tonemapping) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	RendererSceneRenderRD *render_rd = RendererSceneRenderRD::get_singleton();
 
 	thread_local LocalVector<RD::Uniform> uniforms;
 	uniforms.clear();
@@ -1277,7 +1279,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 			clear_colors.push_back(Color(0.0, 0.0, 0.0));
 			RD::DrawListID octmap_draw_list;
 
-			RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP_QUARTER_RES, sky_shader.default_shader_rd, p_render_buffers);
+			RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP_QUARTER_RES, sky_shader.default_shader_rd, p_render_buffers, RID());
 
 			octmap_draw_list = RD::get_singleton()->draw_list_begin(sky->reflection.layers[0].mipmaps[2].framebuffer, RD::DRAW_IGNORE_COLOR_ALL);
 			_render_sky(octmap_draw_list, p_time, sky->reflection.layers[0].mipmaps[2].framebuffer, pipeline, material->uniform_set, texture_uniform_set, cm, Basis(), p_global_pos, p_luminance_multiplier, p_brightness_multiplier, sky->uv_border_size);
@@ -1296,7 +1298,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 			clear_colors.push_back(Color(0.0, 0.0, 0.0));
 
 			RD::DrawListID octmap_draw_list;
-			RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP_HALF_RES, sky_shader.default_shader_rd, p_render_buffers);
+			RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP_HALF_RES, sky_shader.default_shader_rd, p_render_buffers, RID());
 
 			octmap_draw_list = RD::get_singleton()->draw_list_begin(sky->reflection.layers[0].mipmaps[1].framebuffer, RD::DRAW_IGNORE_COLOR_ALL);
 			_render_sky(octmap_draw_list, p_time, sky->reflection.layers[0].mipmaps[1].framebuffer, pipeline, material->uniform_set, texture_uniform_set, cm, Basis(), p_global_pos, p_luminance_multiplier, p_brightness_multiplier, sky->uv_border_size);
@@ -1312,7 +1314,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 
 		RD::get_singleton()->draw_command_begin_label("Render Sky Octmap");
 
-		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP, sky_shader.default_shader_rd, p_render_buffers);
+		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_OCTMAP, sky_shader.default_shader_rd, p_render_buffers, RID());
 
 		octmap_draw_list = RD::get_singleton()->draw_list_begin(sky->reflection.layers[0].mipmaps[0].framebuffer, RD::DRAW_IGNORE_COLOR_ALL, Vector<Color>(), 1.0f, 0, Rect2(), RDD::BreadcrumbMarker::SKY_PASS);
 		_render_sky(octmap_draw_list, p_time, sky->reflection.layers[0].mipmaps[0].framebuffer, pipeline, material->uniform_set, texture_uniform_set, cm, Basis(), p_global_pos, p_luminance_multiplier, p_brightness_multiplier, sky->uv_border_size);
@@ -1422,10 +1424,10 @@ void SkyRD::update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p
 		RID texture = p_render_buffers->create_texture(RB_SCOPE_SKY, RB_QUARTER_TEXTURE, texture_format, usage_bits, RD::TEXTURE_SAMPLES_1, quarter_size);
 		RID framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multiview(sky_scene_state.view_count, texture);
 
-		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_QUARTER_RES, sky_shader.default_shader_rd, p_render_buffers);
+		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_QUARTER_RES, sky_shader.default_shader_rd, p_render_buffers, p_env);
 
 		RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_IGNORE_COLOR_ALL);
-		_render_sky(draw_list, p_time, framebuffer, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier);
+		_render_sky(draw_list, p_time, framebuffer, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier, 0.0f);
 		RD::get_singleton()->draw_list_end();
 	}
 
@@ -1438,10 +1440,10 @@ void SkyRD::update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p
 		RID texture = p_render_buffers->create_texture(RB_SCOPE_SKY, RB_HALF_TEXTURE, texture_format, usage_bits, RD::TEXTURE_SAMPLES_1, half_size);
 		RID framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multiview(sky_scene_state.view_count, texture);
 
-		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_HALF_RES, sky_shader.default_shader_rd, p_render_buffers);
+		RID texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_HALF_RES, sky_shader.default_shader_rd, p_render_buffers, p_env);
 
 		RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_IGNORE_COLOR_ALL);
-		_render_sky(draw_list, p_time, framebuffer, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier);
+		_render_sky(draw_list, p_time, framebuffer, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier, 0.0f);
 		RD::get_singleton()->draw_list_end();
 	}
 
@@ -1501,12 +1503,15 @@ void SkyRD::draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_ren
 
 	RID texture_uniform_set;
 	if (sky) {
-		texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_BACKGROUND, sky_shader.default_shader_rd, p_render_buffers);
+		texture_uniform_set = sky->get_textures(SKY_TEXTURE_SET_BACKGROUND, sky_shader.default_shader_rd, p_render_buffers, p_env);
 	} else {
 		texture_uniform_set = sky_scene_state.fog_only_texture_uniform_set;
 	}
 
-	_render_sky(p_draw_list, p_time, p_fb, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier);
+	RS::EnvironmentToneMapper tonemapper_mode = RendererSceneRenderRD::get_singleton()->environment_get_tone_mapper(p_env);
+	bool using_hdr = RendererRD::TextureStorage::get_singleton()->render_target_is_using_hdr(p_render_buffers->get_render_target());
+
+	_render_sky(p_draw_list, p_time, p_fb, pipeline, material->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier, 0.0);
 }
 
 void SkyRD::invalidate_sky(Sky *p_sky) {
