@@ -273,6 +273,36 @@ void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is
 
 #ifndef SHADOWS_DISABLED
 
+#ifdef PCF_FIXED_KERNEL
+half sample_pcf_shadow_fixed_kernel(texture2D shadow, vec2 shadow_pixel_size, vec3 coord, uint samples) {
+	if (samples == 13) {
+		float avg = textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(shadow_pixel_size.x * 2.0, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(-shadow_pixel_size.x * 2.0, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, shadow_pixel_size.y * 2.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, -shadow_pixel_size.y * 2.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy, coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(shadow_pixel_size.x, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(-shadow_pixel_size.x, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, -shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(shadow_pixel_size.x, shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(-shadow_pixel_size.x, shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(shadow_pixel_size.x, -shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(-shadow_pixel_size.x, -shadow_pixel_size.y), coord.z, 1.0));
+		return half(avg * (1.0 / 13.0));
+	} else if (samples == 5) {
+		float avg = textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy, coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(shadow_pixel_size.x, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(-shadow_pixel_size.x, 0.0), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, shadow_pixel_size.y), coord.z, 1.0));
+		avg += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy + vec2(0.0, -shadow_pixel_size.y), coord.z, 1.0));
+		return half(avg * (1.0 / 5.0));
+	} else {
+		return half(textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(coord.xy, coord.z, 1.0)));
+	}
+}
+#endif
+
 // Interleaved Gradient Noise
 // https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare
 float quick_hash(vec2 pos) {
@@ -281,6 +311,9 @@ float quick_hash(vec2 pos) {
 }
 
 half sample_directional_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec4 coord, float taa_frame_count) {
+#ifdef PCF_FIXED_KERNEL
+	return sample_pcf_shadow_fixed_kernel(shadow, shadow_pixel_size, coord.xyz, sc_directional_soft_shadow_samples());
+#else
 	vec2 pos = coord.xy;
 	float depth = coord.z;
 
@@ -305,9 +338,13 @@ half sample_directional_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec
 	}
 
 	return half(avg * (1.0 / float(sc_directional_soft_shadow_samples())));
+#endif
 }
 
 half sample_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec3 coord, float taa_frame_count) {
+#ifdef PCF_FIXED_KERNEL
+	return sample_pcf_shadow_fixed_kernel(shadow, shadow_pixel_size, coord, sc_soft_shadow_samples());
+#else
 	vec2 pos = coord.xy;
 	float depth = coord.z;
 
@@ -332,9 +369,13 @@ half sample_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec3 coord, flo
 	}
 
 	return half(avg * (1.0 / float(sc_soft_shadow_samples())));
+#endif
 }
 
 half sample_omni_pcf_shadow(texture2D shadow, float blur_scale, vec2 coord, vec4 uv_rect, vec2 flip_offset, float depth, float taa_frame_count) {
+#ifdef PCF_FIXED_KERNEL
+	return half(0.0); // TODO
+#else
 	//if only one sample is taken, take it from the center
 	if (sc_soft_shadow_samples() == 0) {
 		vec2 pos = coord * 0.5 + 0.5;
@@ -376,6 +417,7 @@ half sample_omni_pcf_shadow(texture2D shadow, float blur_scale, vec2 coord, vec4
 	}
 
 	return half(avg * (1.0 / float(sc_soft_shadow_samples())));
+#endif
 }
 
 half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_scale, float taa_frame_count) {
