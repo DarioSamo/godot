@@ -133,8 +133,8 @@ layout(location = 9) out float dp_clip;
 #endif
 
 #if defined(MODE_RENDER_MOTION_VECTORS)
-layout(location = 12) out highp vec4 screen_position;
-layout(location = 13) out highp vec4 prev_screen_position;
+layout(location = 10) out highp vec4 screen_position;
+layout(location = 11) out highp vec4 prev_screen_position;
 #endif
 
 #ifdef USE_MULTIVIEW
@@ -157,8 +157,13 @@ ivec2 multiview_uv(ivec2 uv) {
 #endif // !USE_MULTIVIEW
 
 #if defined(POINT_SIZE_USED) && defined(POINT_COORD_USED)
-layout(location = 14) out vec2 point_coord_interp;
+layout(location = 12) out vec2 point_coord_interp;
 #endif
+
+layout(location = 13) out vec4 first_directional_pssm_coord_1;
+layout(location = 14) out vec4 first_directional_pssm_coord_2;
+layout(location = 15) out vec4 first_directional_pssm_coord_3;
+layout(location = 16) out vec4 first_directional_pssm_coord_4;
 
 invariant gl_Position;
 
@@ -510,18 +515,18 @@ void vertex_shader(in vec3 vertex,
 	// Normalize TBN vectors before interpolation, per MikkTSpace.
 	// See: http://www.mikktspace.com/
 #ifdef NORMAL_USED
-	normal_interp = hvec3(normalize(normal_highp));
+	normal_interp = normalize(normal_highp);
+	hvec3 normal = hvec3(normal_interp);
 #endif
 
 #if defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED) || defined(BENT_NORMAL_MAP_USED)
-	tangent_interp = hvec3(normalize(tangent_highp));
-	binormal_interp = hvec3(normalize(binormal_highp));
+	tangent_interp = normalize(tangent_highp);
+	binormal_interp = normalize(binormal_highp);
 #endif
 
 // VERTEX LIGHTING
-#if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
-	hvec3 normal = hvec3(normal_interp);
-
+#if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
+#ifdef USE_VERTEX_LIGHTING
 #ifdef USE_MULTIVIEW
 	hvec3 view = hvec3(-normalize(vertex_interp - eye_offset));
 #else
@@ -606,8 +611,43 @@ void vertex_shader(in vec3 vertex,
 
 	diffuse_light_interp = hvec4(diffuse_light);
 	specular_light_interp = hvec4(specular_light);
+#endif // USE_VERTEX_LIGHTING
 
-#endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) && defined(USE_VERTEX_LIGHTING)
+	// Compute the coordinate for the PSSM used by the first directional light.
+	uint directional_lights_count = sc_directional_lights(scene_directional_light_count);
+	if (directional_lights_count > 0) {
+		if (bool(directional_lights.data[0].mask & instances.data[instance_index].layer_mask) && (directional_lights.data[0].bake_mode != LIGHT_BAKE_STATIC || !bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) && directional_lights.data[0].shadow_opacity > 0.001) {
+			float depth_z = -vertex.z;
+			hvec3 light_dir = hvec3(directional_lights.data[0].direction);
+			hvec3 base_normal_bias = normal * (half(1.0) - max(half(0.0), dot(light_dir, -normal)));
+
+#define BIAS_FUNC(m_var, m_idx)                                                                        \
+	hvec3 normal_bias = base_normal_bias * half(directional_lights.data[0].shadow_normal_bias[m_idx]); \
+	normal_bias -= light_dir * dot(light_dir, normal_bias);                                            \
+	normal_bias += light_dir * half(directional_lights.data[0].shadow_bias[m_idx]);
+
+			vec4 v = vec4(vertex, 1.0);
+			{
+				BIAS_FUNC(v, 0)
+				first_directional_pssm_coord_1 = (directional_lights.data[0].shadow_matrix1 * (v + vec4(normal_bias, 0.0)));
+			}
+			{
+				BIAS_FUNC(v, 1)
+				first_directional_pssm_coord_2 = (directional_lights.data[0].shadow_matrix2 * (v + vec4(normal_bias, 0.0)));
+			}
+			{
+				BIAS_FUNC(v, 2)
+				first_directional_pssm_coord_3 = (directional_lights.data[0].shadow_matrix3 * (v + vec4(normal_bias, 0.0)));
+			}
+			{
+				BIAS_FUNC(v, 3)
+				first_directional_pssm_coord_4 = (directional_lights.data[0].shadow_matrix4 * (v + vec4(normal_bias, 0.0)));
+			}
+
+#undef BIAS_FUNC
+		}
+	}
+#endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 #ifdef MODE_RENDER_DEPTH
 
@@ -872,8 +912,8 @@ layout(location = 9) in float dp_clip;
 #endif
 
 #if defined(MODE_RENDER_MOTION_VECTORS)
-layout(location = 12) in highp vec4 screen_position;
-layout(location = 13) in highp vec4 prev_screen_position;
+layout(location = 10) in highp vec4 screen_position;
+layout(location = 11) in highp vec4 prev_screen_position;
 #endif
 
 #ifdef USE_LIGHTMAP
@@ -957,8 +997,13 @@ ivec2 multiview_uv(ivec2 uv) {
 #endif // !USE_MULTIVIEW
 
 #if defined(POINT_SIZE_USED) && defined(POINT_COORD_USED)
-layout(location = 14) in vec2 point_coord_interp;
+layout(location = 12) in vec2 point_coord_interp;
 #endif
+
+layout(location = 13) in vec4 first_directional_pssm_coord_1;
+layout(location = 14) in vec4 first_directional_pssm_coord_2;
+layout(location = 15) in vec4 first_directional_pssm_coord_3;
+layout(location = 16) in vec4 first_directional_pssm_coord_4;
 
 //defines to keep compatibility with vertex
 
@@ -1902,13 +1947,53 @@ void main() {
 
 		if (shadowmask_mode != LIGHTMAP_SHADOWMASK_MODE_ONLY) {
 #endif // USE_LIGHTMAP
+			if (bool(directional_lights.data[0].mask & instances.data[draw_call.instance_index].layer_mask) && (directional_lights.data[0].bake_mode != LIGHT_BAKE_STATIC || !bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP))) {
+				half shadow = half(1.0);
+				if (directional_lights.data[0].shadow_opacity > 0.001) {
+					float depth_z = -vertex.z;
+					vec4 pssm_coord;
+					float blur_factor;
+					if (depth_z < directional_lights.data[0].shadow_split_offsets.x) {
+						pssm_coord = first_directional_pssm_coord_1;
+						blur_factor = 1.0;
+					} else if (depth_z < directional_lights.data[0].shadow_split_offsets.y) {
+						pssm_coord = first_directional_pssm_coord_2;
+						blur_factor = directional_lights.data[0].shadow_split_offsets.x / directional_lights.data[0].shadow_split_offsets.y;
+					} else if (depth_z < directional_lights.data[0].shadow_split_offsets.z) {
+						pssm_coord = first_directional_pssm_coord_3;
+						blur_factor = directional_lights.data[0].shadow_split_offsets.x / directional_lights.data[0].shadow_split_offsets.z;
+					} else {
+						pssm_coord = first_directional_pssm_coord_4;
+						blur_factor = directional_lights.data[0].shadow_split_offsets.x / directional_lights.data[0].shadow_split_offsets.w;
+					}
+
+					bool blend_split = sc_directional_light_blend_split(0);
+					float blend_split_weight = blend_split ? 1.0f : 0.0f;
+					shadow = half(sample_directional_pcf_shadow(directional_shadow_atlas, scene_data.directional_shadow_pixel_size * directional_lights.data[0].soft_shadow_scale * (blur_factor + (1.0 - blur_factor) * blend_split_weight), pssm_coord, scene_data.taa_frame_count));
+
+#ifdef USE_LIGHTMAP
+					if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_REPLACE) {
+						shadow = mix(shadow, shadowmask, half(smoothstep(directional_lights.data[0].fade_from, directional_lights.data[0].fade_to, vertex.z))); //done with negative values for performance
+					} else if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_OVERLAY) {
+						shadow = shadowmask * mix(shadow, half(1.0), half(smoothstep(directional_lights.data[0].fade_from, directional_lights.data[0].fade_to, vertex.z))); //done with negative values for performance
+					} else
+#endif
+					{
+						shadow = mix(shadow, half(1.0), half(smoothstep(directional_lights.data[0].fade_from, directional_lights.data[0].fade_to, vertex.z)));
+					}
 
 #ifdef USE_VERTEX_LIGHTING
-			// Only process the first light's shadow for vertex lighting.
-			for (uint i = 0; i < 1; i++) {
-#else
-		for (uint i = 0; i < directional_lights_count; i++) {
+					diffuse_light *= mix(half(1.0), shadow, half(diffuse_light_interp.a));
+					direct_specular_light *= mix(half(1.0), shadow, half(specular_light_interp.a));
 #endif
+				}
+
+				shadows[0] = shadow;
+			}
+
+#ifndef USE_VERTEX_LIGHTING
+			// When using vertex lighting, the rest of directional lights are not processed for shadows.
+			for (uint i = 1; i < directional_lights_count; i++) {
 				if (!bool(directional_lights.data[i].mask & instances.data[draw_call.instance_index].layer_mask)) {
 					continue; //not masked
 				}
@@ -2029,6 +2114,7 @@ void main() {
 
 				shadows[i] = shadow;
 			}
+#endif // !USE_VERTEX_LIGHTING
 
 #ifdef USE_LIGHTMAP
 		} else { // shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_ONLY
