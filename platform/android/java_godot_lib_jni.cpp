@@ -491,6 +491,16 @@ JNIEXPORT jobjectArray JNICALL Java_org_godotengine_godot_GodotLib_getRendererIn
 	String rendering_driver = RenderingServer::get_singleton()->get_current_rendering_driver_name();
 	String rendering_method = RenderingServer::get_singleton()->get_current_rendering_method();
 
+#ifdef VULKAN_ENABLED
+	if (rendering_driver == "vulkan" && !DisplayServerAndroid::check_vulkan_global_context()) {
+		// The Android display server only gets created after this step, so a static check must be used to check for Vulkan
+		// availability instead. If the check fails, it'll fall back to OpenGL3 accordingly if the relevant project setting
+		// is enabled. The Vulkan context created by this check will be reused by the DisplayServer afterwards.
+		rendering_driver = RenderingServer::get_singleton()->get_current_rendering_driver_name();
+		rendering_method = RenderingServer::get_singleton()->get_current_rendering_method();
+	}
+#endif
+
 	jobjectArray result = env->NewObjectArray(2, jni_find_class(env, "java/lang/String"), nullptr);
 	env->SetObjectArrayElement(result, 0, env->NewStringUTF(rendering_driver.utf8().get_data()));
 	env->SetObjectArrayElement(result, 1, env->NewStringUTF(rendering_method.utf8().get_data()));

@@ -196,8 +196,6 @@ static bool _start_success = false;
 String display_driver = "";
 String tablet_driver = "";
 String text_driver = "";
-String rendering_driver = "";
-String rendering_method = "";
 static int text_driver_idx = -1;
 static int audio_driver_idx = -1;
 
@@ -1083,6 +1081,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	bool delta_smoothing_override = false;
 	bool load_shell_env = false;
 
+	String rendering_driver = "";
+	String rendering_method = "";
 	String default_renderer = "";
 	String default_renderer_mobile = "";
 	String renderer_hints = "";
@@ -2421,6 +2421,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	if (default_renderer_mobile.is_empty()) {
 		default_renderer_mobile = "gl_compatibility";
 	}
+
 	// Default to Compatibility when using the project manager.
 	if (rendering_driver.is_empty() && rendering_method.is_empty() && project_manager) {
 		rendering_driver = "opengl3";
@@ -3225,7 +3226,7 @@ Error Main::setup2(bool p_show_boot_logo) {
 		}
 		DisplayServer::accessibility_set_mode(accessibility_mode);
 
-		// rendering_driver now held in static global String in main and initialized in setup()
+		String rendering_driver = OS::get_singleton()->get_current_rendering_driver_name();
 		Error err;
 		display_server = DisplayServer::create(display_driver_idx, rendering_driver, window_mode, window_vsync_mode, window_flags, window_position, window_size, init_screen, context, init_embed_parent_window_id, err);
 		if (err != OK || display_server == nullptr) {
@@ -3860,10 +3861,6 @@ void Main::setup_boot_logo() {
 	}
 	RenderingServer::get_singleton()->set_default_clear_color(
 			GLOBAL_GET("rendering/environment/defaults/default_clear_color"));
-}
-
-String Main::get_rendering_driver_name() {
-	return rendering_driver;
 }
 
 String Main::get_locale_override() {
