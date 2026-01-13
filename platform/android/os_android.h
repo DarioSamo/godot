@@ -141,6 +141,8 @@ public:
 	void set_native_window(ANativeWindow *p_native_window);
 	ANativeWindow *get_native_window() const;
 
+	String get_product_manufacturer_and_model() const;
+
 	virtual Error shell_open(const String &p_uri) override;
 
 	virtual Vector<String> get_system_fonts() const override;

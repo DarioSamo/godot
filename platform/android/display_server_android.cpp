@@ -679,7 +679,25 @@ void DisplayServerAndroid::register_android_driver() {
 #ifdef VULKAN_ENABLED
 bool DisplayServerAndroid::check_vulkan_global_context() {
 	if (!rendering_context_global_checked) {
+		rendering_context_global_checked = true;
+
 		bool fallback_to_opengl3 = GLOBAL_GET("rendering/rendering_device/fallback_to_opengl3");
+
+#if defined(GLES3_ENABLED)
+		if (fallback_to_opengl3 && OS::get_singleton()->get_current_rendering_driver_name() != "opengl3") {
+			// Check if the product is on the list that forces particular devices to use OpenGL3 instead.
+			String product_list_string = GLOBAL_GET("rendering/rendering_device/android/fallback_product_list");
+			PackedStringArray product_list = product_list_string.split(",");
+			String product_key = OS_Android::get_singleton()->get_product_manufacturer_and_model();
+			if (product_list.find(product_key) >= 0) {
+				WARN_PRINT("Your device was blocked from using Vulkan by the project's settings, switching to OpenGL 3.");
+				OS::get_singleton()->set_current_rendering_driver_name("opengl3");
+				OS::get_singleton()->set_current_rendering_method("gl_compatibility");
+				return false;
+			}
+		}
+#endif
+
 		rendering_context_global = memnew(RenderingContextDriverVulkanAndroid);
 		if (rendering_context_global->initialize() != OK) {
 			memdelete(rendering_context_global);
@@ -696,8 +714,6 @@ bool DisplayServerAndroid::check_vulkan_global_context() {
 				ERR_PRINT("Failed to initialize Vulkan context.");
 			}
 		}
-
-		rendering_context_global_checked = true;
 	}
 
 	return rendering_context_global != nullptr;
