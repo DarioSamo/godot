@@ -4,7 +4,7 @@
 
 #VERSION_DEFINES
 
-#ifdef USE_ATTRIBUTES
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
 layout(location = 0) in vec2 vertex_attrib;
 layout(location = 3) in vec4 color_attrib;
 layout(location = 4) in vec2 uv_attrib;
@@ -20,7 +20,28 @@ layout(location = 7) in vec4 custom1_attrib;
 layout(location = 10) in uvec4 bone_attrib;
 layout(location = 11) in vec4 weight_attrib;
 
-#endif
+#endif // USE_ATTRIBUTES || UBERSHADER
+
+#ifndef USE_ATTRIBUTES
+
+layout(location = 1) in vec4 attrib_A;
+layout(location = 2) in vec4 attrib_B;
+layout(location = 5) in vec4 attrib_C;
+layout(location = 8) in vec4 attrib_D;
+layout(location = 9) in vec4 attrib_E;
+
+#ifndef USE_PRIMITIVE
+layout(location = 12) in vec4 attrib_F;
+#endif // USE_PRIMITIVE
+
+#if defined(USE_PRIMITIVE) || defined(UBERSHADER)
+layout(location = 13) in uvec4 attrib_G;
+#endif // USE_PRIMITIVE
+
+layout(location = 14) in uvec4 attrib_H;
+layout(location = 15) in uvec4 attrib_I;
+
+#endif // !USE_ATTRIBUTES
 
 #include "canvas_uniforms_inc.glsl"
 
@@ -32,47 +53,107 @@ layout(location = 1) out vec4 color_interp;
 layout(location = 2) out flat vec4 varying_A;
 layout(location = 3) out flat uvec4 varying_B;
 layout(location = 4) out flat uvec4 varying_C;
+#endif // !USE_ATTRIBUTES
 
-#ifdef USE_NINEPATCH
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
 layout(location = 5) out flat vec4 varying_D;
 layout(location = 6) out flat vec4 varying_E;
 layout(location = 7) out vec2 pixel_size_interp;
-#endif // USE_NINEPATCH
-#endif // !USE_ATTRIBUTES
+#endif // USE_NINEPATCH || UBERSHADER
 
 #define read_draw_data_color_texture_pixel_size params.color_texture_pixel_size
 
-#ifdef USE_ATTRIBUTES
+vec2 read_draw_data_world_x() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.world_x;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_A.xy;
+#else
+		return vec2(0.0f);
+#endif
+	}
+}
 
-#define read_draw_data_world_x params.world_x
-#define read_draw_data_world_y params.world_y
-#define read_draw_data_world_ofs params.world_ofs
-#define read_draw_data_modulation params.modulation
-#define read_draw_data_flags params.flags
-#define read_draw_data_instance_offset params.instance_uniforms_ofs
-#define read_draw_data_lights params.lights
+vec2 read_draw_data_world_y() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.world_y;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_A.zw;
+#else
+		return vec2(0.0f);
+#endif
+	}
+}
 
-#else // !USE_ATTRIBUTES
+vec2 read_draw_data_world_ofs() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.world_ofs;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_B.xy;
+#else
+		return vec2(0.0f);
+#endif
+	}
+}
 
-layout(location = 8) in vec4 attrib_A;
-layout(location = 9) in vec4 attrib_B;
-layout(location = 10) in vec4 attrib_C;
-layout(location = 11) in vec4 attrib_D;
-layout(location = 12) in vec4 attrib_E;
-#ifdef USE_PRIMITIVE
-layout(location = 13) in uvec4 attrib_F;
-#else // !USE_PRIMITIVE
-layout(location = 13) in vec4 attrib_F;
-#endif // USE_PRIMITIVE
-layout(location = 14) in uvec4 attrib_G;
-layout(location = 15) in uvec4 attrib_H;
+vec4 read_draw_data_modulation() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.modulation;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_C;
+#else
+		return vec4(0.0f);
+#endif
+	}
+}
 
-#define read_draw_data_world_x attrib_A.xy
-#define read_draw_data_world_y attrib_A.zw
-#define read_draw_data_world_ofs attrib_B.xy
+uint read_draw_data_flags() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.flags;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_H.z;
+#else
+		return 0;
+#endif
+	}
+}
 
-#ifdef USE_PRIMITIVE
+uvec4 read_draw_data_lights() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.lights;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return attrib_I;
+#else
+		return uvec4(0);
+#endif
+	}
+}
 
+#if defined(USE_PRIMITIVE) || defined(UBERSHADER)
 #define read_draw_data_point_a attrib_C.xy
 #define read_draw_data_point_b attrib_C.zw
 #define read_draw_data_point_c attrib_D.xy
@@ -80,28 +161,23 @@ layout(location = 15) in uvec4 attrib_H;
 #define read_draw_data_uv_b attrib_E.xy
 #define read_draw_data_uv_c attrib_E.zw
 
-#define read_draw_data_color_a_rg attrib_F.x
-#define read_draw_data_color_a_ba attrib_F.y
-#define read_draw_data_color_b_rg attrib_F.z
-#define read_draw_data_color_b_ba attrib_F.w
-#define read_draw_data_color_c_rg attrib_G.x
-#define read_draw_data_color_c_ba attrib_G.y
+#define read_draw_data_color_a_rg attrib_G.x
+#define read_draw_data_color_a_ba attrib_G.y
+#define read_draw_data_color_b_rg attrib_G.z
+#define read_draw_data_color_b_ba attrib_G.w
+#define read_draw_data_color_c_rg attrib_H.x
+#define read_draw_data_color_c_ba attrib_H.y
+#endif // USE_PRIMITIVE || UBERSHADER
 
-#else // !USE_PRIMITIVE
-
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
 #define read_draw_data_ninepatch_pixel_size (attrib_B.zw)
-#define read_draw_data_modulation attrib_C
 #define read_draw_data_ninepatch_margins attrib_D
+#endif // USE_NINEPATCH || UBERSHADER
+
+#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
 #define read_draw_data_dst_rect attrib_E
 #define read_draw_data_src_rect attrib_F
-
-#endif // USE_PRIMITIVE
-
-#define read_draw_data_flags attrib_G.z
-#define read_draw_data_instance_offset attrib_G.w
-#define read_draw_data_lights attrib_H
-
-#endif // USE_ATTRIBUTES
+#endif
 
 #ifdef MATERIAL_UNIFORMS_USED
 /* clang-format off */
@@ -113,27 +189,52 @@ layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
 
 #GLOBALS
 
-#ifdef USE_ATTRIBUTES
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
 vec3 srgb_to_linear(vec3 color) {
 	return mix(pow((color.rgb + vec3(0.055)) * (1.0 / (1.0 + 0.055)), vec3(2.4)), color.rgb * (1.0 / 12.92), lessThan(color.rgb, vec3(0.04045)));
 }
 #endif
 
 void main() {
-#ifndef USE_ATTRIBUTES
-	varying_A = vec4(read_draw_data_world_x, read_draw_data_world_y);
-#ifdef USE_PRIMITIVE
-	varying_B = uvec4(read_draw_data_flags, read_draw_data_instance_offset, 0.0, 0.0);
-#else
-	varying_B = uvec4(read_draw_data_flags, read_draw_data_instance_offset, packHalf2x16(read_draw_data_src_rect.xy), packHalf2x16(read_draw_data_src_rect.zw));
+	uint read_draw_data_instance_offset = 0;
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		read_draw_data_instance_offset = params.instance_uniforms_ofs;
+	} else
 #endif
-	varying_C = read_draw_data_lights;
-#ifdef USE_NINEPATCH
-	varying_D = read_draw_data_ninepatch_margins;
-	varying_E = vec4(read_draw_data_dst_rect.z, read_draw_data_dst_rect.w, read_draw_data_ninepatch_pixel_size.x, read_draw_data_ninepatch_pixel_size.y);
-#endif // USE_NINEPATCH
+	{
+#ifndef USE_ATTRIBUTES
+		read_draw_data_instance_offset = attrib_H.w;
+#endif
+	}
+
+#ifndef USE_ATTRIBUTES
+	varying_A = vec4(read_draw_data_world_x(), read_draw_data_world_y());
+#if defined(USE_PRIMITIVE) || defined(UBERSHADER)
+	if (sc_use_primitive()) {
+		varying_B = uvec4(read_draw_data_flags(), read_draw_data_instance_offset, 0.0, 0.0);
+	} else
+#endif
+#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
+	{
+		varying_B = uvec4(read_draw_data_flags(), read_draw_data_instance_offset, packHalf2x16(read_draw_data_src_rect.xy), packHalf2x16(read_draw_data_src_rect.zw));
+	}
+#endif
+
+	varying_C = read_draw_data_lights();
 #endif // !USE_ATTRIBUTES
 
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
+	if (sc_use_ninepatch()) {
+		varying_D = read_draw_data_ninepatch_margins;
+		varying_E = vec4(read_draw_data_dst_rect.z, read_draw_data_dst_rect.w, read_draw_data_ninepatch_pixel_size.x, read_draw_data_ninepatch_pixel_size.y);
+	} else {
+		varying_D = vec4(0.0f);
+		varying_E = vec4(0.0f);
+	}
+#endif // USE_NINEPATCH || UBERSHADER
+
+	float point_size = 1.0;
 	vec4 instance_custom = vec4(0.0);
 #if defined(CUSTOM0_USED)
 	vec4 custom0 = vec4(0.0);
@@ -141,140 +242,141 @@ void main() {
 #if defined(CUSTOM1_USED)
 	vec4 custom1 = vec4(0.0);
 #endif
+	vec2 vertex = vec2(0.0f);
+	vec2 vertex_base = vec2(0.0f);
+	vec2 uv = vec2(0.0f);
+	vec4 color = vec4(0.0f);
+	uvec4 bones = uvec4(0);
+	vec4 bone_weights = vec4(0.0f);
+	mat4 model_matrix = mat4(
+			vec4(read_draw_data_world_x(), 0.0, 0.0),
+			vec4(read_draw_data_world_y(), 0.0, 0.0),
+			vec4(0.0, 0.0, 1.0, 0.0),
+			vec4(read_draw_data_world_ofs(), 0.0, 1.0));
 
-#ifdef USE_PRIMITIVE
+#if defined(USE_PRIMITIVE) || defined(UBERSHADER)
+	if (sc_use_primitive()) {
+		if (gl_VertexIndex == 0) {
+			vertex = read_draw_data_point_a;
+			uv = read_draw_data_uv_a;
+			color = vec4(unpackHalf2x16(read_draw_data_color_a_rg), unpackHalf2x16(read_draw_data_color_a_ba));
+		} else if (gl_VertexIndex == 1) {
+			vertex = read_draw_data_point_b;
+			uv = read_draw_data_uv_b;
+			color = vec4(unpackHalf2x16(read_draw_data_color_b_rg), unpackHalf2x16(read_draw_data_color_b_ba));
+		} else {
+			vertex = read_draw_data_point_c;
+			uv = read_draw_data_uv_c;
+			color = vec4(unpackHalf2x16(read_draw_data_color_c_rg), unpackHalf2x16(read_draw_data_color_c_ba));
+		}
+	} else
+#endif
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+			if (sc_use_attributes()) {
+		vertex = vertex_attrib;
+		color = color_attrib;
+		if (bool(canvas_data.flags & CANVAS_FLAGS_CONVERT_ATTRIBUTES_TO_LINEAR)) {
+			color.rgb = srgb_to_linear(color.rgb);
+		}
 
-	//weird bug,
-	//this works
-	vec2 vertex;
-	vec2 uv;
-	vec4 color;
-
-	if (gl_VertexIndex == 0) {
-		vertex = read_draw_data_point_a;
-		uv = read_draw_data_uv_a;
-		color = vec4(unpackHalf2x16(read_draw_data_color_a_rg), unpackHalf2x16(read_draw_data_color_a_ba));
-	} else if (gl_VertexIndex == 1) {
-		vertex = read_draw_data_point_b;
-		uv = read_draw_data_uv_b;
-		color = vec4(unpackHalf2x16(read_draw_data_color_b_rg), unpackHalf2x16(read_draw_data_color_b_ba));
-	} else {
-		vertex = read_draw_data_point_c;
-		uv = read_draw_data_uv_c;
-		color = vec4(unpackHalf2x16(read_draw_data_color_c_rg), unpackHalf2x16(read_draw_data_color_c_ba));
-	}
-
-	uvec4 bones = uvec4(0, 0, 0, 0);
-	vec4 bone_weights = vec4(0.0);
-
-#elif defined(USE_ATTRIBUTES)
-
-	vec2 vertex = vertex_attrib;
-	vec4 color = color_attrib;
-	if (bool(canvas_data.flags & CANVAS_FLAGS_CONVERT_ATTRIBUTES_TO_LINEAR)) {
-		color.rgb = srgb_to_linear(color.rgb);
-	}
-	color *= read_draw_data_modulation;
-	vec2 uv = uv_attrib;
-
+		color *= read_draw_data_modulation();
+		uv = uv_attrib;
 #if defined(CUSTOM0_USED)
-	custom0 = custom0_attrib;
+		custom0 = custom0_attrib;
 #endif
 
 #if defined(CUSTOM1_USED)
-	custom1 = custom1_attrib;
+		custom1 = custom1_attrib;
 #endif
-
-	uvec4 bones = bone_attrib;
-	vec4 bone_weights = weight_attrib;
-#else // !USE_ATTRIBUTES
-
-	vec2 vertex_base_arr[4] = vec2[](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
-	vec2 vertex_base = vertex_base_arr[gl_VertexIndex];
-
-	vec2 uv = read_draw_data_src_rect.xy + abs(read_draw_data_src_rect.zw) * ((read_draw_data_flags & INSTANCE_FLAGS_TRANSPOSE_RECT) != 0 ? vertex_base.yx : vertex_base.xy);
-	vec4 color = read_draw_data_modulation;
-	vec2 vertex = read_draw_data_dst_rect.xy + abs(read_draw_data_dst_rect.zw) * mix(vertex_base, vec2(1.0, 1.0) - vertex_base, lessThan(read_draw_data_src_rect.zw, vec2(0.0, 0.0)));
-	uvec4 bones = uvec4(0, 0, 0, 0);
-
-#endif // USE_ATTRIBUTES
-
-	mat4 model_matrix = mat4(vec4(read_draw_data_world_x, 0.0, 0.0), vec4(read_draw_data_world_y, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(read_draw_data_world_ofs, 0.0, 1.0));
-
-#ifdef USE_ATTRIBUTES
-
-	uint instancing = params.batch_flags & BATCH_FLAGS_INSTANCING_MASK;
-
-	if (instancing > 1) {
-		// trails
-
-		uint stride = 2 + 1 + 1; //particles always uses this format
-
-		uint trail_size = instancing;
-
-		uint offset = trail_size * stride * gl_InstanceIndex;
-
-		vec4 pcolor;
-		vec2 new_vertex;
-		{
-			uint boffset = offset + bone_attrib.x * stride;
-			new_vertex = (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.x;
-			pcolor = transforms.data[boffset + 2] * weight_attrib.x;
-		}
-		if (weight_attrib.y > 0.001) {
-			uint boffset = offset + bone_attrib.y * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.y;
-			pcolor += transforms.data[boffset + 2] * weight_attrib.y;
-		}
-		if (weight_attrib.z > 0.001) {
-			uint boffset = offset + bone_attrib.z * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.z;
-			pcolor += transforms.data[boffset + 2] * weight_attrib.z;
-		}
-		if (weight_attrib.w > 0.001) {
-			uint boffset = offset + bone_attrib.w * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.w;
-			pcolor += transforms.data[boffset + 2] * weight_attrib.w;
-		}
-
-		instance_custom = transforms.data[offset + 3];
-
-		vertex = new_vertex;
-		color *= pcolor;
-	} else if (instancing == 1) {
-		uint stride = 2 + bitfieldExtract(params.batch_flags, BATCH_FLAGS_INSTANCING_HAS_COLORS_SHIFT, 1) + bitfieldExtract(params.batch_flags, BATCH_FLAGS_INSTANCING_HAS_CUSTOM_DATA_SHIFT, 1);
-
-		uint offset = stride * gl_InstanceIndex;
-
-		mat4 matrix = mat4(transforms.data[offset + 0], transforms.data[offset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0));
-		offset += 2;
-
-		if (bool(params.batch_flags & BATCH_FLAGS_INSTANCING_HAS_COLORS)) {
-			color *= transforms.data[offset];
-			offset += 1;
-		}
-
-		if (bool(params.batch_flags & BATCH_FLAGS_INSTANCING_HAS_CUSTOM_DATA)) {
-			instance_custom = transforms.data[offset];
-		}
-
-		matrix = transpose(matrix);
-		model_matrix = model_matrix * matrix;
+		bones = bone_attrib;
+		bone_weights = weight_attrib;
+	} else
+#endif
+	{
+#if !defined(USE_PRIMITIVE) && !defined(USE_ATTRIBUTES)
+		vec2 vertex_base_arr[4] = vec2[](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
+		vertex_base = vertex_base_arr[gl_VertexIndex];
+		uv = read_draw_data_src_rect.xy + abs(read_draw_data_src_rect.zw) * ((read_draw_data_flags() & INSTANCE_FLAGS_TRANSPOSE_RECT) != 0 ? vertex_base.yx : vertex_base.xy);
+		color = read_draw_data_modulation();
+		vertex = read_draw_data_dst_rect.xy + abs(read_draw_data_dst_rect.zw) * mix(vertex_base, vec2(1.0, 1.0) - vertex_base, lessThan(read_draw_data_src_rect.zw, vec2(0.0, 0.0)));
+#endif
 	}
-#endif // USE_ATTRIBUTES
 
-	float point_size = 1.0;
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		uint instancing = params.batch_flags & BATCH_FLAGS_INSTANCING_MASK;
+		if (instancing > 1) {
+			// trails
+
+			uint stride = 2 + 1 + 1; //particles always uses this format
+
+			uint trail_size = instancing;
+
+			uint offset = trail_size * stride * gl_InstanceIndex;
+
+			vec4 pcolor;
+			vec2 new_vertex;
+			{
+				uint boffset = offset + bone_attrib.x * stride;
+				new_vertex = (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.x;
+				pcolor = transforms.data[boffset + 2] * weight_attrib.x;
+			}
+			if (weight_attrib.y > 0.001) {
+				uint boffset = offset + bone_attrib.y * stride;
+				new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.y;
+				pcolor += transforms.data[boffset + 2] * weight_attrib.y;
+			}
+			if (weight_attrib.z > 0.001) {
+				uint boffset = offset + bone_attrib.z * stride;
+				new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.z;
+				pcolor += transforms.data[boffset + 2] * weight_attrib.z;
+			}
+			if (weight_attrib.w > 0.001) {
+				uint boffset = offset + bone_attrib.w * stride;
+				new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.w;
+				pcolor += transforms.data[boffset + 2] * weight_attrib.w;
+			}
+
+			instance_custom = transforms.data[offset + 3];
+
+			vertex = new_vertex;
+			color *= pcolor;
+		} else if (instancing == 1) {
+			uint stride = 2 + bitfieldExtract(params.batch_flags, BATCH_FLAGS_INSTANCING_HAS_COLORS_SHIFT, 1) + bitfieldExtract(params.batch_flags, BATCH_FLAGS_INSTANCING_HAS_CUSTOM_DATA_SHIFT, 1);
+
+			uint offset = stride * gl_InstanceIndex;
+
+			mat4 matrix = mat4(transforms.data[offset + 0], transforms.data[offset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0));
+			offset += 2;
+
+			if (bool(params.batch_flags & BATCH_FLAGS_INSTANCING_HAS_COLORS)) {
+				color *= transforms.data[offset];
+				offset += 1;
+			}
+
+			if (bool(params.batch_flags & BATCH_FLAGS_INSTANCING_HAS_CUSTOM_DATA)) {
+				instance_custom = transforms.data[offset];
+			}
+
+			matrix = transpose(matrix);
+			model_matrix = model_matrix * matrix;
+		}
+	}
+#endif // USE_ATTRIBUTES || UBERSHADER
 
 #ifdef USE_WORLD_VERTEX_COORDS
 	vertex = (model_matrix * vec4(vertex, 0.0, 1.0)).xy;
 #endif
+
 	{
 #CODE : VERTEX
 	}
 
-#ifdef USE_NINEPATCH
-	pixel_size_interp = abs(read_draw_data_dst_rect.zw) * vertex_base;
-#endif
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
+	if (sc_use_ninepatch()) {
+		pixel_size_interp = abs(read_draw_data_dst_rect.zw) * vertex_base;
+	}
+#endif // USE_NINEPATCH || UBERSHADER
 
 #if !defined(SKIP_TRANSFORM_USED) && !defined(USE_WORLD_VERTEX_COORDS)
 	vertex = (model_matrix * vec4(vertex, 0.0, 1.0)).xy;
@@ -295,9 +397,9 @@ void main() {
 
 	gl_Position = canvas_data.screen_transform * vec4(vertex, 0.0, 1.0);
 
-#ifdef USE_POINT_SIZE
+#if defined(USE_POINT_SIZE) || defined(UBERSHADER)
 	gl_PointSize = point_size;
-#endif
+#endif // USE_POINT_SIZE || UBERSHADER
 }
 
 #[fragment]
@@ -311,42 +413,92 @@ void main() {
 layout(location = 0) in vec4 uv_vertex_interp;
 layout(location = 1) in vec4 color_interp;
 
-#define read_draw_data_color_texture_pixel_size params.color_texture_pixel_size
-
-#ifdef USE_ATTRIBUTES
-
-#define read_draw_data_world_x params.world_x
-#define read_draw_data_world_y params.world_y
-#define read_draw_data_flags params.flags
-#define read_draw_data_instance_offset params.instance_uniforms_ofs
-#define read_draw_data_lights params.lights
-
-#else // !USE_ATTRIBUTES
-
+#ifndef USE_ATTRIBUTES
 // Can all be flat as they are the same for the whole batched instance
 layout(location = 2) in flat vec4 varying_A;
 
-#define read_draw_data_world_x varying_A.xy
-#define read_draw_data_world_y varying_A.zw
-
 layout(location = 3) in flat uvec4 varying_B;
 layout(location = 4) in flat uvec4 varying_C;
-#define read_draw_data_flags varying_B.x
-#define read_draw_data_instance_offset varying_B.y
-#define read_draw_data_src_rect (varying_B.zw)
-#define read_draw_data_lights varying_C
+#endif
 
-#ifdef USE_NINEPATCH
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
 layout(location = 5) in flat vec4 varying_D;
 layout(location = 6) in flat vec4 varying_E;
 layout(location = 7) in vec2 pixel_size_interp;
+#endif
+
+#define read_draw_data_color_texture_pixel_size params.color_texture_pixel_size
+
+vec2 read_draw_data_world_x() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.world_x;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return varying_A.xy;
+#else
+		return vec2(0.0f);
+#endif
+	}
+}
+
+vec2 read_draw_data_world_y() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.world_y;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return varying_A.zw;
+#else
+		return vec2(0.0f);
+#endif
+	}
+}
+
+uint read_draw_data_flags() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.flags;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return varying_B.x;
+#else
+		return 0;
+#endif
+	}
+}
+
+uvec4 read_draw_data_lights() {
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		return params.lights;
+	} else
+#endif
+	{
+#ifndef USE_ATTRIBUTES
+		return varying_C;
+#else
+		return uvec4(0);
+#endif
+	}
+}
+
+#if !defined(USE_ATTRIBUTES)
+#define read_draw_data_src_rect (varying_B.zw)
+#endif
+
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
 #define read_draw_data_ninepatch_margins varying_D
 #define read_draw_data_dst_rect_z varying_E.x
 #define read_draw_data_dst_rect_w varying_E.y
 #define read_draw_data_ninepatch_pixel_size (varying_E.zw)
-#endif // USE_NINEPATCH
-
-#endif // USE_ATTRIBUTES
+#endif // USE_NINEPATCH || UBERSHADER
 
 layout(location = 0) out vec4 frag_color;
 
@@ -425,7 +577,7 @@ vec4 light_compute(
 
 #endif
 
-#ifdef USE_NINEPATCH
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
 
 float map_ninepatch_axis(float pixel, float draw_size, float tex_pixel_size, float margin_begin, float margin_end, int np_repeat, inout int draw_center) {
 	float tex_size = 1.0 / tex_pixel_size;
@@ -435,7 +587,7 @@ float map_ninepatch_axis(float pixel, float draw_size, float tex_pixel_size, flo
 	} else if (pixel >= draw_size - margin_end) {
 		return (tex_size - (draw_size - pixel)) * tex_pixel_size;
 	} else {
-		draw_center -= 1 - int(bitfieldExtract(read_draw_data_flags, INSTANCE_FLAGS_NINEPATCH_DRAW_CENTER_SHIFT, 1));
+		draw_center -= 1 - int(bitfieldExtract(read_draw_data_flags(), INSTANCE_FLAGS_NINEPATCH_DRAW_CENTER_SHIFT, 1));
 
 		// np_repeat is passed as uniform using NinePatchRect::AxisStretchMode enum.
 		if (np_repeat == 0) { // Stretch.
@@ -464,7 +616,7 @@ float map_ninepatch_axis(float pixel, float draw_size, float tex_pixel_size, flo
 	}
 }
 
-#endif
+#endif // USE_NINEPATCH || UBERSHADER
 
 vec3 light_normal_compute(vec3 light_vec, vec3 normal, vec3 base_color, vec3 light_color, vec4 specular_shininess, bool specular_shininess_used) {
 	float cNdotL = max(0.0, dot(normal, light_vec));
@@ -566,72 +718,92 @@ void main() {
 	vec2 uv = uv_vertex_interp.xy;
 	vec2 vertex = uv_vertex_interp.zw;
 
-#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
-	vec4 src_rect = vec4(unpackHalf2x16(read_draw_data_src_rect.x), unpackHalf2x16(read_draw_data_src_rect.y));
-	vec4 region_rect = src_rect;
-#else
-	vec4 region_rect = vec4(0.0, 0.0, 1.0 / read_draw_data_color_texture_pixel_size);
+	vec4 region_rect = vec4(0.0f);
+	vec4 src_rect = vec4(0.0f);
+
+	uint read_draw_data_instance_offset = 0;
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
+	if (sc_use_attributes()) {
+		read_draw_data_instance_offset = params.instance_uniforms_ofs;
+	} else
 #endif
-
-#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
-
-#ifdef USE_NINEPATCH
-
-	int draw_center = 2;
-	uv = vec2(
-			map_ninepatch_axis(pixel_size_interp.x, abs(read_draw_data_dst_rect_z), read_draw_data_ninepatch_pixel_size.x, read_draw_data_ninepatch_margins.x, read_draw_data_ninepatch_margins.z, int(bitfieldExtract(read_draw_data_flags, INSTANCE_FLAGS_NINEPATCH_H_MODE_SHIFT, 2)), draw_center),
-			map_ninepatch_axis(pixel_size_interp.y, abs(read_draw_data_dst_rect_w), read_draw_data_ninepatch_pixel_size.y, read_draw_data_ninepatch_margins.y, read_draw_data_ninepatch_margins.w, int(bitfieldExtract(read_draw_data_flags, INSTANCE_FLAGS_NINEPATCH_V_MODE_SHIFT, 2)), draw_center));
-
-	if (draw_center == 0) {
-		color.a = 0.0;
-	}
-
-	uv = uv * src_rect.zw + src_rect.xy; //apply region if needed
-
-#endif
-	if (bool(read_draw_data_flags & INSTANCE_FLAGS_CLIP_RECT_UV)) {
-		vec2 half_texpixel = read_draw_data_color_texture_pixel_size * 0.5;
-		uv = clamp(uv, src_rect.xy + half_texpixel, src_rect.xy + abs(src_rect.zw) - half_texpixel);
-	}
-
-#endif
-
-#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
-	// only used by TYPE_RECT
-	if (sc_use_msdf()) {
-		float px_range = params.msdf.x;
-		float outline_thickness = params.msdf.y;
-
-		vec4 msdf_sample = texture(sampler2D(color_texture, texture_sampler), uv);
-		vec2 msdf_size = vec2(textureSize(sampler2D(color_texture, texture_sampler), 0));
-		vec2 dest_size = vec2(1.0) / fwidth(uv);
-		float px_size = max(0.5 * dot((vec2(px_range) / msdf_size), dest_size), 1.0);
-		float d = msdf_median(msdf_sample.r, msdf_sample.g, msdf_sample.b);
-
-		if (outline_thickness > 0) {
-			float cr = clamp(outline_thickness, 0.0, (px_range / 2.0) - 1.0) / px_range;
-			d = min(d, msdf_sample.a);
-			float a = clamp((d - 0.5 + cr) * px_size, 0.0, 1.0);
-			color.a = a * color.a;
-		} else {
-			float a = clamp((d - 0.5) * px_size + 0.5, 0.0, 1.0);
-			color.a = a * color.a;
-		}
-	} else if (sc_use_lcd()) {
-		vec4 lcd_sample = texture(sampler2D(color_texture, texture_sampler), uv);
-		if (lcd_sample.a == 1.0) {
-			color.rgb = lcd_sample.rgb * color.a;
-		} else {
-			color = vec4(0.0, 0.0, 0.0, 0.0);
-		}
-	} else {
-#else
 	{
+#ifndef USE_ATTRIBUTES
+		read_draw_data_instance_offset = varying_B.y;
 #endif
+	}
+
+#if defined(USE_ATTRIBUTES) || defined(USE_PRIMITIVE) || defined(UBERSHADER)
+	if (sc_use_attributes() || sc_use_primitive()) {
+		region_rect = vec4(0.0, 0.0, 1.0 / read_draw_data_color_texture_pixel_size);
+	} else
+#endif
+	{
+#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
+		src_rect = vec4(unpackHalf2x16(read_draw_data_src_rect.x), unpackHalf2x16(read_draw_data_src_rect.y));
+		region_rect = src_rect;
+#endif
+	}
+
+#if defined(USE_NINEPATCH) || defined(UBERSHADER)
+	if (sc_use_ninepatch()) {
+		int draw_center = 2;
+		uv = vec2(
+				map_ninepatch_axis(pixel_size_interp.x, abs(read_draw_data_dst_rect_z), read_draw_data_ninepatch_pixel_size.x, read_draw_data_ninepatch_margins.x, read_draw_data_ninepatch_margins.z, int(bitfieldExtract(read_draw_data_flags(), INSTANCE_FLAGS_NINEPATCH_H_MODE_SHIFT, 2)), draw_center),
+				map_ninepatch_axis(pixel_size_interp.y, abs(read_draw_data_dst_rect_w), read_draw_data_ninepatch_pixel_size.y, read_draw_data_ninepatch_margins.y, read_draw_data_ninepatch_margins.w, int(bitfieldExtract(read_draw_data_flags(), INSTANCE_FLAGS_NINEPATCH_V_MODE_SHIFT, 2)), draw_center));
+
+		if (draw_center == 0) {
+			color.a = 0.0;
+		}
+
+		uv = uv * src_rect.zw + src_rect.xy; //apply region if needed
+	}
+#endif
+
+#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
+	if (!sc_use_attributes() && !sc_use_primitive()) {
+		if (bool(read_draw_data_flags() & INSTANCE_FLAGS_CLIP_RECT_UV)) {
+			vec2 half_texpixel = read_draw_data_color_texture_pixel_size * 0.5;
+			uv = clamp(uv, src_rect.xy + half_texpixel, src_rect.xy + abs(src_rect.zw) - half_texpixel);
+		}
+
+		// only used by TYPE_RECT
+		if (sc_use_msdf()) {
+			float px_range = params.msdf.x;
+			float outline_thickness = params.msdf.y;
+
+			vec4 msdf_sample = texture(sampler2D(color_texture, texture_sampler), uv);
+			vec2 msdf_size = vec2(textureSize(sampler2D(color_texture, texture_sampler), 0));
+			vec2 dest_size = vec2(1.0) / fwidth(uv);
+			float px_size = max(0.5 * dot((vec2(px_range) / msdf_size), dest_size), 1.0);
+			float d = msdf_median(msdf_sample.r, msdf_sample.g, msdf_sample.b);
+
+			if (outline_thickness > 0) {
+				float cr = clamp(outline_thickness, 0.0, (px_range / 2.0) - 1.0) / px_range;
+				d = min(d, msdf_sample.a);
+				float a = clamp((d - 0.5 + cr) * px_size, 0.0, 1.0);
+				color.a = a * color.a;
+			} else {
+				float a = clamp((d - 0.5) * px_size + 0.5, 0.0, 1.0);
+				color.a = a * color.a;
+			}
+		} else if (sc_use_lcd()) {
+			vec4 lcd_sample = texture(sampler2D(color_texture, texture_sampler), uv);
+			if (lcd_sample.a == 1.0) {
+				color.rgb = lcd_sample.rgb * color.a;
+			} else {
+				color = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		} else {
+			color *= texture(sampler2D(color_texture, texture_sampler), uv);
+		}
+	} else
+#endif
+	{
 		color *= texture(sampler2D(color_texture, texture_sampler), uv);
 	}
 
-	uint light_count = read_draw_data_flags & 15u; //max 15 lights
+	uint light_count = read_draw_data_flags() & 15u; //max 15 lights
 	bool using_light = ((light_count + canvas_data.directional_light_count) > 0) && sc_use_lighting();
 
 	vec3 normal;
@@ -645,12 +817,15 @@ void main() {
 	if (normal_used || (using_light && bool(params.batch_flags & BATCH_FLAGS_DEFAULT_NORMAL_MAP_USED))) {
 		normal.xy = texture(sampler2D(normal_texture, texture_sampler), uv).xy * vec2(2.0, -2.0) - vec2(1.0, -1.0);
 
-#if !defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)
-		if (bool(read_draw_data_flags & INSTANCE_FLAGS_TRANSPOSE_RECT)) {
-			normal.xy = normal.yx;
+#if (!defined(USE_ATTRIBUTES) && !defined(USE_PRIMITIVE)) || defined(UBERSHADER)
+		if (!sc_use_attributes() && !sc_use_primitive()) {
+			if (bool(read_draw_data_flags() & INSTANCE_FLAGS_TRANSPOSE_RECT)) {
+				normal.xy = normal.yx;
+			}
+			normal.xy *= sign(src_rect.zw);
 		}
-		normal.xy *= sign(src_rect.zw);
 #endif
+
 		normal.z = sqrt(max(0.0, 1.0 - dot(normal.xy, normal.xy)));
 		normal_used = true;
 	} else {
@@ -660,7 +835,6 @@ void main() {
 	vec4 specular_shininess;
 
 #if defined(SPECULAR_SHININESS_USED)
-
 	bool specular_shininess_used = true;
 #else
 	bool specular_shininess_used = false;
@@ -700,7 +874,7 @@ void main() {
 
 	if (normal_used) {
 		//convert by item transform
-		normal.xy = mat2(normalize(read_draw_data_world_x), normalize(read_draw_data_world_y)) * normal.xy;
+		normal.xy = mat2(normalize(read_draw_data_world_x()), normalize(read_draw_data_world_y())) * normal.xy;
 		//convert by canvas transform
 		normal = normalize((canvas_data.canvas_normal_transform * vec4(normal, 0.0)).xyz);
 	}
@@ -758,11 +932,12 @@ void main() {
 
 		// Positional Lights
 
+		uvec4 lights = read_draw_data_lights();
 		for (uint i = 0; i < MAX_LIGHTS_PER_ITEM; i++) {
 			if (i >= light_count) {
 				break;
 			}
-			uint light_base = bitfieldExtract(read_draw_data_lights[i >> 2], (int(i) & 0x3) * 8, 8);
+			uint light_base = bitfieldExtract(lights[i >> 2], (int(i) & 0x3) * 8, 8);
 
 			vec2 tex_uv = (vec4(vertex, 0.0, 1.0) * mat4(light_array.data[light_base].texture_matrix[0], light_array.data[light_base].texture_matrix[1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy; //multiply inverse given its transposed. Optimizer removes useless operations.
 			vec2 tex_uv_atlas = tex_uv * light_array.data[light_base].atlas_rect.zw + light_array.data[light_base].atlas_rect.xy;
@@ -797,7 +972,7 @@ void main() {
 			}
 #endif
 
-			if (bool(light_array.data[light_base].flags & LIGHT_FLAGS_HAS_SHADOW) && bool(read_draw_data_flags & (INSTANCE_FLAGS_SHADOW_MASKED << i))) {
+			if (bool(light_array.data[light_base].flags & LIGHT_FLAGS_HAS_SHADOW) && bool(read_draw_data_flags() & (INSTANCE_FLAGS_SHADOW_MASKED << i))) {
 				vec2 shadow_pos = (vec4(shadow_vertex, 0.0, 1.0) * mat4(light_array.data[light_base].shadow_matrix[0], light_array.data[light_base].shadow_matrix[1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy; //multiply inverse given its transposed. Optimizer removes useless operations.
 
 				vec2 pos_norm = normalize(shadow_pos);

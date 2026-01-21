@@ -470,10 +470,14 @@ RID RendererCanvasRenderRD::_create_base_uniform_set(RID p_to_render_target, boo
 }
 
 RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance, void *p_surface, uint32_t p_surface_index, RID *r_vertex_array) {
-	r_pipeline_key.ubershader = 0;
+	r_pipeline_key.ubershader = r_pipeline_key.shader_specialization.use_attributes ? 0 : 1;
 
-	const uint32_t ubershader_iterations = 1;
+	const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes ? 1 : 2;
 	while (r_pipeline_key.ubershader < ubershader_iterations) {
+		if (r_pipeline_key.ubershader) {
+			r_pipeline_key.variant = SHADER_VARIANT_UBERSHADER;
+		}
+
 		if (r_vertex_array != nullptr) {
 			RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 			uint64_t input_mask = p_shader_data->get_vertex_input_mask(r_pipeline_key.variant, r_pipeline_key.ubershader);
@@ -1640,19 +1644,22 @@ Pair<ShaderRD *, RID> RendererCanvasRenderRD::CanvasShaderData::get_native_shade
 }
 
 RID RendererCanvasRenderRD::CanvasShaderData::get_shader(ShaderVariant p_shader_variant, bool p_ubershader) const {
+	DEV_ASSERT((p_ubershader && p_shader_variant == SHADER_VARIANT_UBERSHADER) || (!p_ubershader && p_shader_variant != SHADER_VARIANT_UBERSHADER));
+
 	if (version.is_valid()) {
-		uint32_t variant_index = p_shader_variant + (p_ubershader ? SHADER_VARIANT_MAX : 0);
 		RendererCanvasRenderRD *canvas_singleton = static_cast<RendererCanvasRenderRD *>(RendererCanvasRender::singleton);
 		MutexLock lock(canvas_singleton->shader.mutex);
-		return canvas_singleton->shader.canvas_shader.version_get_shader(version, variant_index);
+		return canvas_singleton->shader.canvas_shader.version_get_shader(version, (uint32_t)(p_shader_variant));
 	} else {
 		return RID();
 	}
 }
 
 uint64_t RendererCanvasRenderRD::CanvasShaderData::get_vertex_input_mask(ShaderVariant p_shader_variant, bool p_ubershader) {
+	DEV_ASSERT((p_ubershader && p_shader_variant == SHADER_VARIANT_UBERSHADER) || (!p_ubershader && p_shader_variant != SHADER_VARIANT_UBERSHADER));
+
 	// Vertex input masks require knowledge of the shader. Since querying the shader can be expensive due to high contention and the necessary mutex, we cache the result instead.
-	uint32_t input_mask_index = p_shader_variant + (p_ubershader ? SHADER_VARIANT_MAX : 0);
+	uint32_t input_mask_index = (uint32_t)(p_shader_variant);
 	uint64_t input_mask = vertex_input_masks[input_mask_index].load(std::memory_order_relaxed);
 	if (input_mask == 0) {
 		RID shader_rid = get_shader(p_shader_variant, p_ubershader);
@@ -1745,16 +1752,13 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 
 		state.light_uniforms = memnew_arr(LightUniform, MAX_LIGHTS_PER_RENDER);
 		Vector<String> variants;
-		const uint32_t ubershader_iterations = 1;
-		for (uint32_t ubershader = 0; ubershader < ubershader_iterations; ubershader++) {
-			const String base_define = ubershader ? "\n#define UBERSHADER\n" : "";
-			variants.push_back(base_define + ""); // SHADER_VARIANT_QUAD
-			variants.push_back(base_define + "#define USE_NINEPATCH\n"); // SHADER_VARIANT_NINEPATCH
-			variants.push_back(base_define + "#define USE_PRIMITIVE\n"); // SHADER_VARIANT_PRIMITIVE
-			variants.push_back(base_define + "#define USE_PRIMITIVE\n#define USE_POINT_SIZE\n"); // SHADER_VARIANT_PRIMITIVE_POINTS
-			variants.push_back(base_define + "#define USE_ATTRIBUTES\n"); // SHADER_VARIANT_ATTRIBUTES
-			variants.push_back(base_define + "#define USE_ATTRIBUTES\n#define USE_POINT_SIZE\n"); // SHADER_VARIANT_ATTRIBUTES_POINTS
-		}
+		variants.push_back("\n#define UBERSHADER\n"); // SHADER_VARIANT_UBERSHADER
+		variants.push_back(""); // SHADER_VARIANT_QUAD
+		variants.push_back("\n#define USE_NINEPATCH\n"); // SHADER_VARIANT_NINEPATCH
+		variants.push_back("\n#define USE_PRIMITIVE\n"); // SHADER_VARIANT_PRIMITIVE
+		variants.push_back("\n#define USE_PRIMITIVE\n#define USE_POINT_SIZE\n"); // SHADER_VARIANT_PRIMITIVE_POINTS
+		variants.push_back("\n#define USE_ATTRIBUTES\n"); // SHADER_VARIANT_ATTRIBUTES
+		variants.push_back("\n#define USE_ATTRIBUTES\n#define USE_POINT_SIZE\n"); // SHADER_VARIANT_ATTRIBUTES_POINTS
 
 		shader.canvas_shader.initialize(variants, global_defines, {}, {});
 
@@ -1964,55 +1968,81 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
 		vd.stride = sizeof(InstanceData);
 		vd.frequency = RD::VERTEX_FREQUENCY_INSTANCE;
-		vd.location = 8;
+		vd.location = 1;
 		vd.binding = 0; // Explicitly assign binding 0 for instance data.
 		vd.offset = offset;
 		offset += sizeof(float) * 4;
 		vf.push_back(vd); // attrib_A
 
-		vd.location = 9;
+		vd.location = 2;
 		vd.offset = offset;
 		offset += sizeof(float) * 4;
 		vf.push_back(vd); // attrib_B
 
-		vd.location = 10;
+		vd.location = 5;
 		vd.offset = offset;
 		offset += sizeof(float) * 4;
 		vf.push_back(vd); // attrib_C
 
-		vd.location = 11;
+		vd.location = 8;
 		vd.offset = offset;
 		offset += sizeof(float) * 4;
 		vf.push_back(vd); // attrib_D
 
-		vd.location = 12;
+		vd.location = 9;
 		vd.offset = offset;
 		offset += sizeof(float) * 4;
 		vf.push_back(vd); // attrib_E
 
-		uint32_t attrib_F_index = vf.size();
-		vd.location = 13;
+		// We explicitly don't increase the offset, as attrib_G should read the same data but reinterpreted as UINT.
+		vd.location = 12;
 		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_F (RECT, NINEPATCH)
+		vf.push_back(vd); // attrib_F
 
 		vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
-		vd.location = 14;
+		vd.location = 13;
 		vd.offset = offset;
 		offset += sizeof(uint32_t) * 4;
 		vf.push_back(vd); // attrib_G
 
-		vd.location = 15;
+		vd.location = 14;
 		vd.offset = offset;
 		offset += sizeof(uint32_t) * 4;
 		vf.push_back(vd); // attrib_H
 
-		// RECT, NINEPATCH
-		shader.quad_vertex_format_id = RD::get_singleton()->vertex_format_create(vf);
+		vd.location = 15;
+		vd.offset = offset;
+		offset += sizeof(uint32_t) * 4;
+		vf.push_back(vd); // attrib_I
 
-		// PRIMITIVE
-		vf.write[attrib_F_index].format = RD::DATA_FORMAT_R32G32B32A32_UINT;
-		shader.primitive_vertex_format_id = RD::get_singleton()->vertex_format_create(vf);
+		/// BIND POLYGON ELEMENTS TO NULL OFFSET AND STRIDE
+		vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+		vd.offset = 0;
+		vd.location = RS::ARRAY_VERTEX;
+		vf.push_back(vd); // vertex_attrib
+
+		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+		vd.offset = 0;
+		vd.location = RS::ARRAY_COLOR;
+		vf.push_back(vd); // color_attrib
+
+		vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+		vd.offset = 0;
+		vd.location = RS::ARRAY_TEX_UV;
+		vf.push_back(vd); // uv_attrib
+
+		vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
+		vd.offset = 0;
+		vd.location = RS::ARRAY_BONES;
+		vf.push_back(vd); // bone_attrib
+
+		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+		vd.offset = 0;
+		vd.location = RS::ARRAY_WEIGHTS;
+		vf.push_back(vd); // weight_attrib
+		///
+
+		shader.vertex_format_id = RD::get_singleton()->vertex_format_create(vf);
 	}
 
 	{ //primitive
@@ -3049,24 +3079,28 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 	pipeline_key.shader_specialization.use_lighting = p_batch->use_lighting;
 	pipeline_key.shader_specialization.use_msdf = p_batch->use_msdf;
 	pipeline_key.shader_specialization.use_lcd = p_batch->use_lcd;
+	pipeline_key.shader_specialization.use_ninepatch = pipeline_key.variant == SHADER_VARIANT_NINEPATCH;
+	pipeline_key.shader_specialization.use_attributes = pipeline_key.variant == SHADER_VARIANT_ATTRIBUTES || pipeline_key.variant == SHADER_VARIANT_ATTRIBUTES_POINTS;
+	pipeline_key.shader_specialization.use_primitive = pipeline_key.variant == SHADER_VARIANT_PRIMITIVE || pipeline_key.variant == SHADER_VARIANT_PRIMITIVE_POINTS;
 	pipeline_key.lcd_blend = p_batch->has_blend;
 
+	PushConstantAttributes push_constant;
 	switch (p_batch->command_type) {
 		case Item::Command::TYPE_RECT:
 		case Item::Command::TYPE_NINEPATCH: {
-			PushConstant push_constant = p_batch->push_constant();
+			push_constant.base = p_batch->push_constant();
 
-			pipeline_key.vertex_format_id = shader.quad_vertex_format_id;
-			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant);
+			pipeline_key.vertex_format_id = shader.vertex_format_id;
+			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant.base);
 			RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, pipeline);
 			if (p_batch->has_blend) {
 				RD::get_singleton()->draw_list_set_blend_constants(p_draw_list, p_batch->modulate);
 			}
 
-			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(push_constant));
+			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, pipeline_key.ubershader ? sizeof(PushConstantAttributes) : sizeof(PushConstant));
 			FixedVector<RID, 1> vb = { p_batch->instance_buffer };
 			FixedVector<uint64_t, 1> vo = { uint64_t(p_batch->start) * sizeof(InstanceData) };
-			RD::get_singleton()->draw_list_bind_vertex_buffers_format(p_draw_list, shader.quad_vertex_format_id, 1, vb, vo);
+			RD::get_singleton()->draw_list_bind_vertex_buffers_format(p_draw_list, shader.vertex_format_id, 1, vb, vo);
 			RD::get_singleton()->draw_list_bind_index_array(p_draw_list, shader.quad_index_array);
 			RD::get_singleton()->draw_list_draw(p_draw_list, true, p_batch->instance_count);
 
@@ -3079,7 +3113,7 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 
 		case Item::Command::TYPE_POLYGON: {
 			ERR_FAIL_NULL(p_batch->command);
-			PushConstantAttributes push_constant = p_batch->push_constant_attributes();
+			push_constant = p_batch->push_constant_attributes();
 
 			const Item::CommandPolygon *polygon = static_cast<const Item::CommandPolygon *>(p_batch->command);
 
@@ -3087,10 +3121,10 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 			ERR_FAIL_NULL(pb);
 
 			pipeline_key.vertex_format_id = pb->vertex_format_id;
-			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant);
+			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant.base);
 			RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, pipeline);
 
-			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(push_constant));
+			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(PushConstantAttributes));
 			RD::get_singleton()->draw_list_bind_vertex_array(p_draw_list, pb->vertex_array);
 			if (pb->indices.is_valid()) {
 				RD::get_singleton()->draw_list_bind_index_array(p_draw_list, pb->indices);
@@ -3109,15 +3143,15 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 
 			const Item::CommandPrimitive *primitive = static_cast<const Item::CommandPrimitive *>(p_batch->command);
 
-			PushConstant push_constant = p_batch->push_constant();
-			pipeline_key.vertex_format_id = shader.primitive_vertex_format_id;
-			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant);
+			push_constant.base = p_batch->push_constant();
+			pipeline_key.vertex_format_id = shader.vertex_format_id;
+			pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant.base);
 			RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, pipeline);
 
-			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(push_constant));
+			RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, pipeline_key.ubershader ? sizeof(PushConstantAttributes) : sizeof(PushConstant));
 			FixedVector<RID, 1> vb = { p_batch->instance_buffer };
 			FixedVector<uint64_t, 1> vo = { uint64_t(p_batch->start) * sizeof(InstanceData) };
-			RD::get_singleton()->draw_list_bind_vertex_buffers_format(p_draw_list, shader.primitive_vertex_format_id, 1, vb, vo);
+			RD::get_singleton()->draw_list_bind_vertex_buffers_format(p_draw_list, shader.vertex_format_id, 1, vb, vo);
 			RD::get_singleton()->draw_list_bind_index_array(p_draw_list, primitive_arrays.index_array[MIN(3u, primitive->point_count) - 1]);
 			uint32_t instance_count = p_batch->instance_count;
 			RD::get_singleton()->draw_list_draw(p_draw_list, true, instance_count);
@@ -3135,7 +3169,7 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 		case Item::Command::TYPE_PARTICLES: {
 			ERR_FAIL_NULL(p_batch->command);
 
-			PushConstantAttributes push_constant = p_batch->push_constant_attributes();
+			push_constant = p_batch->push_constant_attributes();
 
 			RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 			RendererRD::ParticlesStorage *particles_storage = RendererRD::ParticlesStorage::get_singleton();
@@ -3194,10 +3228,10 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 				pipeline_key.render_primitive = _primitive_type_to_render_primitive(primitive);
 				pipeline_key.vertex_format_id = RD::INVALID_FORMAT_ID;
 
-				pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant, mesh_instance, surface, j, &vertex_array);
+				pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant.base, mesh_instance, surface, j, &vertex_array);
 				RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, pipeline);
 
-				RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(push_constant));
+				RD::get_singleton()->draw_list_set_push_constant(p_draw_list, &push_constant, sizeof(PushConstantAttributes));
 
 				RID index_array = mesh_storage->mesh_surface_get_index_array(surface, 0);
 

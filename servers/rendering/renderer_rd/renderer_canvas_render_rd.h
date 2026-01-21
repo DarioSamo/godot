@@ -53,6 +53,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	static const uint32_t BATCH_DATA_BUFFER_COUNT = 3;
 
 	enum ShaderVariant {
+		SHADER_VARIANT_UBERSHADER,
 		SHADER_VARIANT_QUAD,
 		SHADER_VARIANT_NINEPATCH,
 		SHADER_VARIANT_PRIMITIVE,
@@ -120,6 +121,9 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 				uint32_t use_lighting : 1;
 				uint32_t use_msdf : 1;
 				uint32_t use_lcd : 1;
+				uint32_t use_ninepatch : 1;
+				uint32_t use_attributes : 1;
+				uint32_t use_primitive : 1;
 			};
 		};
 	};
@@ -186,8 +190,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		RID default_version_rd_shader;
 		RID quad_index_buffer;
 		RID quad_index_array;
-		RD::VertexFormatID quad_vertex_format_id;
-		RD::VertexFormatID primitive_vertex_format_id;
+		RD::VertexFormatID vertex_format_id;
 		ShaderCompiler compiler;
 		uint32_t pipeline_compilations[RS::PIPELINE_SOURCE_MAX] = {};
 		Mutex mutex;

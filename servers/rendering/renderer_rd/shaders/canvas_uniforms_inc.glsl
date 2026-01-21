@@ -16,28 +16,6 @@
 #define INSTANCE_FLAGS_SHADOW_MASKED_SHIFT 13 // 16 bits.
 #define INSTANCE_FLAGS_SHADOW_MASKED (1 << INSTANCE_FLAGS_SHADOW_MASKED_SHIFT)
 
-struct InstanceData {
-	vec2 world_x;
-	vec2 world_y;
-	vec2 world_ofs;
-	vec2 ninepatch_pixel_size;
-#ifdef USE_PRIMITIVE
-	vec2 points[3];
-	vec2 uvs[3];
-	uint colors[6];
-#else
-	vec4 modulation;
-	vec4 ninepatch_margins;
-	vec4 dst_rect; //for built-in rect and UV
-	vec4 src_rect;
-	vec2 pad;
-
-#endif
-	uint flags;
-	uint instance_uniforms_ofs;
-	uvec4 lights;
-};
-
 //1 means enabled, 2+ means trails in use
 #define BATCH_FLAGS_INSTANCING_MASK 0x7F
 #define BATCH_FLAGS_INSTANCING_HAS_COLORS_SHIFT 7
@@ -56,7 +34,7 @@ layout(push_constant, std430) uniform Params {
 
 	vec2 msdf;
 	vec2 color_texture_pixel_size;
-#ifdef USE_ATTRIBUTES
+#if defined(USE_ATTRIBUTES) || defined(UBERSHADER)
 	// Particles and meshes
 	vec2 world_x;
 	vec2 world_y;
@@ -67,7 +45,7 @@ layout(push_constant, std430) uniform Params {
 
 	vec4 modulation;
 	uvec4 lights;
-#endif
+#endif // USE_ATTRIBUTES || UBERSHADER
 }
 params;
 
@@ -101,6 +79,18 @@ bool sc_use_msdf() {
 
 bool sc_use_lcd() {
 	return ((sc_packed_0() >> 2) & 1U) != 0;
+}
+
+bool sc_use_ninepatch() {
+	return ((sc_packed_0() >> 3) & 1U) != 0;
+}
+
+bool sc_use_attributes() {
+	return ((sc_packed_0() >> 4) & 1U) != 0;
+}
+
+bool sc_use_primitive() {
+	return ((sc_packed_0() >> 5) & 1U) != 0;
 }
 
 // In vulkan, sets should always be ordered using the following logic:
