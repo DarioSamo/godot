@@ -379,13 +379,6 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 		surface.can_use_lightmap = mesh_storage->mesh_surface_get_format(mesh_surface) & RS::ARRAY_FORMAT_TEX_UV2;
 		_mesh_compile_pipelines_for_surface(surface, global_pipeline_data_required, RS::PIPELINE_SOURCE_MESH, &pipeline_pairs);
 	}
-
-	// Try to wait for all the pipelines that were compiled. This will force the loader to wait on all ubershader pipelines to be ready.
-	if (!p_background_compilation && !pipeline_pairs.is_empty()) {
-		for (ShaderPipelinePair pair : pipeline_pairs) {
-			pair.first->pipeline_hash_map.wait_for_pipeline(pair.second.hash());
-		}
-	}
 }
 
 uint32_t RenderForwardMobile::get_pipeline_compilations(RS::PipelineSource p_source) {

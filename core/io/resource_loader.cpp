@@ -321,6 +321,14 @@ Ref<Resource> ResourceLoader::_load(const String &p_path, const String &p_origin
 	res_ref_overrides.erase(load_nesting);
 	load_nesting--;
 
+	if (load_nesting == 0 && !required_tasks_to_finish.is_empty()) {
+		for (WorkerThreadPool::TaskID task : required_tasks_to_finish) {
+			WorkerThreadPool::get_singleton()->wait_for_task_completion(task);
+		}
+
+		required_tasks_to_finish.clear();
+	}
+
 	if (res.is_valid()) {
 		return res;
 	} else {
@@ -1496,6 +1504,10 @@ void ResourceLoader::remove_custom_loaders() {
 	}
 }
 
+void ResourceLoader::add_required_task_to_finish(WorkerThreadPool::TaskID p_task) {
+	required_tasks_to_finish.push_back(p_task);
+}
+
 bool ResourceLoader::is_cleaning_tasks() {
 	MutexLock lock(thread_load_mutex);
 	return cleaning_tasks;
@@ -1571,6 +1583,7 @@ thread_local int ResourceLoader::load_nesting = 0;
 thread_local Vector<String> ResourceLoader::load_paths_stack;
 thread_local HashMap<int, HashMap<String, Ref<Resource>>> ResourceLoader::res_ref_overrides;
 thread_local ResourceLoader::ThreadLoadTask *ResourceLoader::curr_load_task = nullptr;
+thread_local LocalVector<WorkerThreadPool::TaskID> ResourceLoader::required_tasks_to_finish;
 
 SafeBinaryMutex<ResourceLoader::BINARY_MUTEX_TAG> &_get_res_loader_mutex() {
 	return ResourceLoader::thread_load_mutex;

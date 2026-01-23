@@ -470,8 +470,6 @@ RID RendererCanvasRenderRD::_create_base_uniform_set(RID p_to_render_target, boo
 }
 
 RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance, void *p_surface, uint32_t p_surface_index, RID *r_vertex_array) {
-	r_pipeline_key.ubershader = r_pipeline_key.shader_specialization.use_attributes ? 0 : 1;
-
 	const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes ? 1 : 2;
 	while (r_pipeline_key.ubershader < ubershader_iterations) {
 		if (r_pipeline_key.ubershader) {
@@ -496,7 +494,7 @@ RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasSha
 		}
 
 		bool wait_for_compilation = r_pipeline_key.ubershader || ubershader_iterations == 1;
-		RS::PipelineSource source = RS::PIPELINE_SOURCE_CANVAS;
+		RS::PipelineSource source = r_pipeline_key.ubershader ? RS::PIPELINE_SOURCE_DRAW : RS::PIPELINE_SOURCE_SPECIALIZATION;
 		RID pipeline = p_shader_data->pipeline_hash_map.get_pipeline(r_pipeline_key, r_pipeline_key.hash(), wait_for_compilation, source);
 		if (pipeline.is_valid()) {
 			return pipeline;
@@ -1490,6 +1488,21 @@ void RendererCanvasRenderRD::CanvasShaderData::_clear_vertex_input_mask_cache() 
 	}
 }
 
+static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(bool p_use_hdr, bool p_srgb, RD::TextureSamples p_samples) {
+	const bool multisampling = p_samples > RD::TEXTURE_SAMPLES_1;
+	RD::AttachmentFormat attachment;
+	thread_local Vector<RD::AttachmentFormat> attachments;
+	attachments.clear();
+
+	// Color attachment.
+	attachment.samples = p_samples;
+	attachment.format = RendererRD::TextureStorage::render_target_get_color_format(p_use_hdr, p_srgb);
+	attachment.usage_flags = RendererRD::TextureStorage::render_target_get_color_usage_bits(multisampling);
+	attachments.push_back(attachment);
+
+	return RD::get_singleton()->framebuffer_format_create(attachments);
+}
+
 void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pipeline_key) {
 #if PRINT_PIPELINE_COMPILATION_KEYS
 	print_line(
@@ -1540,6 +1553,21 @@ void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pi
 	ERR_FAIL_COND(pipeline.is_null());
 
 	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key.hash(), pipeline);
+}
+
+void RendererCanvasRenderRD::CanvasShaderData::_compile_ubershader_pipelines(RD::VertexFormatID p_vertex_format_id) {
+	// TODO:
+	// - Compile more primitive types based on types seen.
+	// - Probably don't bother with LCD blend other than for the default shader.
+	// - Fetch project settings for sRGB, HDR and MSAA levels.
+	PipelineKey pipeline_key;
+	pipeline_key.variant = SHADER_VARIANT_UBERSHADER;
+	pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(false, false, RD::TEXTURE_SAMPLES_1);
+	pipeline_key.vertex_format_id = p_vertex_format_id;
+	pipeline_key.render_primitive = RD::RENDER_PRIMITIVE_TRIANGLES;
+	pipeline_key.lcd_blend = false;
+	pipeline_key.ubershader = 1;
+	pipeline_hash_map.compile_pipeline(pipeline_key, pipeline_key.hash(), RS::PIPELINE_SOURCE_MATERIAL, true);
 }
 
 void RendererCanvasRenderRD::CanvasShaderData::set_code(const String &p_code) {
@@ -1622,6 +1650,8 @@ void RendererCanvasRenderRD::CanvasShaderData::set_code(const String &p_code) {
 	ubo_size = gen_code.uniform_total_size;
 	ubo_offsets = gen_code.uniform_offsets;
 	texture_uniforms = gen_code.texture_uniforms;
+
+	_compile_ubershader_pipelines(canvas_singleton->shader.vertex_format_id);
 }
 
 bool RendererCanvasRenderRD::CanvasShaderData::is_animated() const {
@@ -2044,6 +2074,9 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 
 		shader.vertex_format_id = RD::get_singleton()->vertex_format_create(vf);
 	}
+
+	// Compile the ubershader pipeline for the default shader as soon as the vertex format is created.
+	shader.default_version_data->_compile_ubershader_pipelines(shader.vertex_format_id);
 
 	{ //primitive
 		primitive_arrays.index_array[0] = RD::get_singleton()->index_array_create(shader.quad_index_buffer, 0, 1);

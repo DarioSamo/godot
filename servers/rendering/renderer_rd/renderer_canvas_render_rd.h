@@ -170,6 +170,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 		void _clear_vertex_input_mask_cache();
 		void _create_pipeline(PipelineKey p_pipeline_key);
+		void _compile_ubershader_pipelines(RD::VertexFormatID p_vertex_format_id);
 		virtual void set_code(const String &p_Code);
 		virtual bool is_animated() const;
 		virtual bool casts_shadows() const;

@@ -104,7 +104,7 @@ void Performance::_bind_methods() {
 	BIND_ENUM_CONSTANT(NAVIGATION_EDGE_FREE_COUNT);
 	BIND_ENUM_CONSTANT(NAVIGATION_OBSTACLE_COUNT);
 #endif // !defined(NAVIGATION_2D_DISABLED) || !defined(NAVIGATION_3D_DISABLED)
-	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_CANVAS);
+	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_MATERIAL);
 	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_MESH);
 	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_SURFACE);
 	BIND_ENUM_CONSTANT(PIPELINE_COMPILATIONS_DRAW);
@@ -199,7 +199,7 @@ String Performance::get_monitor_name(Monitor p_monitor) const {
 		PNAME("navigation/edges_free"),
 		PNAME("navigation/obstacles"),
 #endif // !defined(NAVIGATION_2D_DISABLED) || !defined(NAVIGATION_3D_DISABLED)
-		PNAME("pipeline/compilations_canvas"),
+		PNAME("pipeline/compilations_material"),
 		PNAME("pipeline/compilations_mesh"),
 		PNAME("pipeline/compilations_surface"),
 		PNAME("pipeline/compilations_draw"),
@@ -272,8 +272,8 @@ double Performance::get_monitor(Monitor p_monitor) const {
 			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_TEXTURE_MEM_USED);
 		case RENDER_BUFFER_MEM_USED:
 			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_BUFFER_MEM_USED);
-		case PIPELINE_COMPILATIONS_CANVAS:
-			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS);
+		case PIPELINE_COMPILATIONS_MATERIAL:
+			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_MATERIAL);
 		case PIPELINE_COMPILATIONS_MESH:
 			return RS::get_singleton()->get_rendering_info(RS::RENDERING_INFO_PIPELINE_COMPILATIONS_MESH);
 		case PIPELINE_COMPILATIONS_SURFACE:

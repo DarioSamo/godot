@@ -33,7 +33,7 @@
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server.h"
 
-#define PRINT_PIPELINE_COMPILATION_KEYS 0
+#define PRINT_PIPELINE_COMPILATION_KEYS 1
 
 template <typename Key, typename CreationClass, typename CreationFunction>
 class PipelineHashMapRD {
@@ -119,8 +119,8 @@ public:
 #if PRINT_PIPELINE_COMPILATION_KEYS
 		String source_name = "UNKNOWN";
 		switch (p_source) {
-			case RS::PIPELINE_SOURCE_CANVAS:
-				source_name = "CANVAS";
+			case RS::PIPELINE_SOURCE_MATERIAL:
+				source_name = "MATERIAL";
 				break;
 			case RS::PIPELINE_SOURCE_MESH:
 				source_name = "MESH";
@@ -142,6 +142,10 @@ public:
 		// Queue a background compilation task.
 		WorkerThreadPool::TaskID task_id = WorkerThreadPool::get_singleton()->add_template_task(creation_object, creation_function, p_key, p_high_priority, "PipelineCompilation");
 		compilation_tasks.insert(p_key_hash, task_id);
+
+		if (ResourceLoader::is_within_load()) {
+			ResourceLoader::add_required_task_to_finish(task_id);
+		}
 	}
 
 	void wait_for_pipeline(uint32_t p_key_hash) {
