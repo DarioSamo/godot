@@ -102,232 +102,185 @@ void RendererCanvasRenderRD::_update_transform_to_mat4(const Transform3D &p_tran
 }
 
 RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Vector<int> &p_indices, const Vector<Point2> &p_points, const Vector<Color> &p_colors, const Vector<Point2> &p_uvs, const Vector<int> &p_bones, const Vector<float> &p_weights, int p_count) {
-	// Care must be taken to generate array formats
-	// in ways where they could be reused, so we will
-	// put single-occurring elements first, and repeated
-	// elements later. This way the generated formats are
-	// the same no matter the length of the arrays.
-	// This dramatically reduces the amount of pipeline objects
-	// that need to be created for these formats.
-
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
-
 	uint32_t vertex_count = p_points.size();
-	uint32_t stride = 2; //vertices always repeat
-	if ((uint32_t)p_colors.size() == vertex_count || p_colors.size() == 1) {
-		stride += 4;
-	}
-	if ((uint32_t)p_uvs.size() == vertex_count) {
-		stride += 2;
-	}
-	if ((uint32_t)p_bones.size() == vertex_count * 4 && (uint32_t)p_weights.size() == vertex_count * 4) {
-		stride += 4;
+
+	// TODO: Refactor this code to instead use one large buffer and suballocate from it instead of creating buffers for every single polygon that is created.
+	thread_local LocalVector<float> position_buffer;
+	thread_local LocalVector<float> color_buffer;
+	thread_local LocalVector<float> uv_buffer;
+	thread_local LocalVector<uint16_t> bone_buffer;
+	thread_local LocalVector<uint16_t> weight_buffer;
+	position_buffer.resize(vertex_count * 2);
+
+	const bool uses_color = (uint32_t)(p_colors.size()) == vertex_count || p_colors.size() == 1;
+	if (uses_color) {
+		color_buffer.resize(vertex_count * 4);
 	}
 
-	uint32_t buffer_size = stride * p_points.size();
+	const bool uses_uv = (uint32_t)(p_uvs.size()) == vertex_count;
+	if (uses_uv) {
+		uv_buffer.resize(vertex_count * 2);
+	}
 
-	Vector<uint8_t> polygon_buffer;
-	polygon_buffer.resize(buffer_size * sizeof(float));
-	Vector<RD::VertexAttribute> descriptions;
+	const bool uses_bones = (uint32_t)(p_bones.size()) == (vertex_count * 4) && (uint32_t)(p_weights.size()) == (vertex_count * 4);
+	if (uses_bones) {
+		bone_buffer.resize(vertex_count * 4);
+		weight_buffer.resize(vertex_count * 4);
+	}
+
+	PolygonBuffers pb;
+	thread_local Vector<RD::VertexAttribute> descriptions;
+	thread_local Vector<RID> buffers;
 	descriptions.resize(5);
-	Vector<RID> buffers;
 	buffers.resize(5);
 
-	{
-		uint8_t *r = polygon_buffer.ptrw();
-		float *fptr = reinterpret_cast<float *>(r);
-		uint32_t *uptr = reinterpret_cast<uint32_t *>(r);
-		uint32_t base_offset = 0;
-		{ //vertices
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
-			vd.offset = base_offset * sizeof(float);
-			vd.location = RS::ARRAY_VERTEX;
-			vd.stride = stride * sizeof(float);
+	// Positions.
+	RD::VertexAttribute &position = descriptions.write[0];
+	position.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+	position.offset = 0;
+	position.location = RS::ARRAY_VERTEX;
+	position.stride = sizeof(float) * 2;
 
-			descriptions.write[0] = vd;
+	const Vector2 *points_ptr = p_points.ptr();
+	uint32_t j = 0;
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		position_buffer[j++] = points_ptr[i].x;
+		position_buffer[j++] = points_ptr[i].y;
+	}
 
-			const Vector2 *points_ptr = p_points.ptr();
+	uint32_t position_buffer_size = position_buffer.size() * sizeof(float);
+	buffers.write[0] = RD::get_singleton()->vertex_buffer_create(position_buffer_size, Span((const uint8_t *)(position_buffer.ptr()), position_buffer_size));
+	pb.vertex_buffers.push_back(buffers[0]);
 
+	// Colors.
+	RD::VertexAttribute &color = descriptions.write[1];
+	color.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+	color.offset = 0;
+	color.location = RS::ARRAY_COLOR;
+	if (uses_color) {
+		color.stride = sizeof(float) * 4;
+		j = 0;
+
+		if (p_colors.size() == 1) {
+			Color color = p_colors[0];
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				fptr[base_offset + i * stride + 0] = points_ptr[i].x;
-				fptr[base_offset + i * stride + 1] = points_ptr[i].y;
+				color_buffer[j++] = color.r;
+				color_buffer[j++] = color.g;
+				color_buffer[j++] = color.b;
+				color_buffer[j++] = color.a;
 			}
-
-			base_offset += 2;
-		}
-
-		//colors
-		if ((uint32_t)p_colors.size() == vertex_count || p_colors.size() == 1) {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-			vd.offset = base_offset * sizeof(float);
-			vd.location = RS::ARRAY_COLOR;
-			vd.stride = stride * sizeof(float);
-
-			descriptions.write[1] = vd;
-
-			if (p_colors.size() == 1) {
-				Color color = p_colors[0];
-				for (uint32_t i = 0; i < vertex_count; i++) {
-					fptr[base_offset + i * stride + 0] = color.r;
-					fptr[base_offset + i * stride + 1] = color.g;
-					fptr[base_offset + i * stride + 2] = color.b;
-					fptr[base_offset + i * stride + 3] = color.a;
-				}
-			} else {
-				const Color *color_ptr = p_colors.ptr();
-
-				for (uint32_t i = 0; i < vertex_count; i++) {
-					fptr[base_offset + i * stride + 0] = color_ptr[i].r;
-					fptr[base_offset + i * stride + 1] = color_ptr[i].g;
-					fptr[base_offset + i * stride + 2] = color_ptr[i].b;
-					fptr[base_offset + i * stride + 3] = color_ptr[i].a;
-				}
-			}
-			base_offset += 4;
 		} else {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-			vd.offset = 0;
-			vd.location = RS::ARRAY_COLOR;
-			vd.stride = 0;
-
-			descriptions.write[1] = vd;
-			buffers.write[1] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_COLOR);
-		}
-
-		//uvs
-		if ((uint32_t)p_uvs.size() == vertex_count) {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
-			vd.offset = base_offset * sizeof(float);
-			vd.location = RS::ARRAY_TEX_UV;
-			vd.stride = stride * sizeof(float);
-
-			descriptions.write[2] = vd;
-
-			const Vector2 *uv_ptr = p_uvs.ptr();
-
+			const Color *color_ptr = p_colors.ptr();
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				fptr[base_offset + i * stride + 0] = uv_ptr[i].x;
-				fptr[base_offset + i * stride + 1] = uv_ptr[i].y;
+				color_buffer[j++] = color_ptr[i].r;
+				color_buffer[j++] = color_ptr[i].g;
+				color_buffer[j++] = color_ptr[i].b;
+				color_buffer[j++] = color_ptr[i].a;
 			}
-			base_offset += 2;
-		} else {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
-			vd.offset = 0;
-			vd.location = RS::ARRAY_TEX_UV;
-			vd.stride = 0;
-
-			descriptions.write[2] = vd;
-			buffers.write[2] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_TEX_UV);
 		}
 
-		//bones
-		if ((uint32_t)p_indices.size() == vertex_count * 4 && (uint32_t)p_weights.size() == vertex_count * 4) {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R16G16B16A16_UINT;
-			vd.offset = base_offset * sizeof(float);
-			vd.location = RS::ARRAY_BONES;
-			vd.stride = stride * sizeof(float);
+		uint32_t color_buffer_size = color_buffer.size() * sizeof(float);
+		buffers.write[1] = RD::get_singleton()->vertex_buffer_create(color_buffer_size, Span((const uint8_t *)(color_buffer.ptr()), color_buffer_size));
+		pb.vertex_buffers.push_back(buffers[1]);
+	} else {
+		color.stride = 0;
+		buffers.write[1] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_COLOR);
+	}
 
-			descriptions.write[3] = vd;
+	// UVs.
+	RD::VertexAttribute &uv = descriptions.write[2];
+	uv.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+	uv.offset = 0;
+	uv.location = RS::ARRAY_TEX_UV;
+	if (uses_uv) {
+		uv.stride = sizeof(float) * 2;
+		j = 0;
 
-			const int *bone_ptr = p_bones.ptr();
-
-			for (uint32_t i = 0; i < vertex_count; i++) {
-				uint16_t *bone16w = (uint16_t *)&uptr[base_offset + i * stride];
-
-				bone16w[0] = bone_ptr[i * 4 + 0];
-				bone16w[1] = bone_ptr[i * 4 + 1];
-				bone16w[2] = bone_ptr[i * 4 + 2];
-				bone16w[3] = bone_ptr[i * 4 + 3];
-			}
-
-			base_offset += 2;
-		} else {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
-			vd.offset = 0;
-			vd.location = RS::ARRAY_BONES;
-			vd.stride = 0;
-
-			descriptions.write[3] = vd;
-			buffers.write[3] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_BONES);
+		const Vector2 *uv_ptr = p_uvs.ptr();
+		for (uint32_t i = 0; i < vertex_count; i++) {
+			uv_buffer[j++] = uv_ptr[i].x;
+			uv_buffer[j++] = uv_ptr[i].y;
 		}
 
-		//weights
-		if ((uint32_t)p_weights.size() == vertex_count * 4) {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R16G16B16A16_UNORM;
-			vd.offset = base_offset * sizeof(float);
-			vd.location = RS::ARRAY_WEIGHTS;
-			vd.stride = stride * sizeof(float);
+		uint32_t uv_buffer_size = uv_buffer.size() * sizeof(float);
+		buffers.write[2] = RD::get_singleton()->vertex_buffer_create(uv_buffer_size, Span((const uint8_t *)(uv_buffer.ptr()), uv_buffer_size));
+		pb.vertex_buffers.push_back(buffers[2]);
+	} else {
+		uv.stride = 0;
+		buffers.write[2] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_TEX_UV);
+	}
 
-			descriptions.write[4] = vd;
+	// Bones.
+	RD::VertexAttribute &bone = descriptions.write[3];
+	bone.format = RD::DATA_FORMAT_R16G16B16A16_UINT;
+	bone.offset = 0;
+	bone.location = RS::ARRAY_BONES;
+	if (uses_bones) {
+		bone.stride = sizeof(uint16_t) * 4;
+		j = 0;
 
-			const float *weight_ptr = p_weights.ptr();
-
-			for (uint32_t i = 0; i < vertex_count; i++) {
-				uint16_t *weight16w = (uint16_t *)&uptr[base_offset + i * stride];
-
-				weight16w[0] = CLAMP(weight_ptr[i * 4 + 0] * 65535, 0, 65535);
-				weight16w[1] = CLAMP(weight_ptr[i * 4 + 1] * 65535, 0, 65535);
-				weight16w[2] = CLAMP(weight_ptr[i * 4 + 2] * 65535, 0, 65535);
-				weight16w[3] = CLAMP(weight_ptr[i * 4 + 3] * 65535, 0, 65535);
-			}
-
-			base_offset += 2;
-		} else {
-			RD::VertexAttribute vd;
-			vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-			vd.offset = 0;
-			vd.location = RS::ARRAY_WEIGHTS;
-			vd.stride = 0;
-
-			descriptions.write[4] = vd;
-			buffers.write[4] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_WEIGHTS);
+		const int *bone_ptr = p_bones.ptr();
+		for (uint32_t i = 0; i < vertex_count; i++) {
+			bone_buffer[j++] = bone_ptr[i * 4 + 0];
+			bone_buffer[j++] = bone_ptr[i * 4 + 1];
+			bone_buffer[j++] = bone_ptr[i * 4 + 2];
+			bone_buffer[j++] = bone_ptr[i * 4 + 3];
 		}
 
-		//check that everything is as it should be
-		ERR_FAIL_COND_V(base_offset != stride, 0); //bug
+		uint32_t bone_buffer_size = bone_buffer.size() * sizeof(uint16_t);
+		buffers.write[3] = RD::get_singleton()->vertex_buffer_create(bone_buffer_size, Span((const uint8_t *)(bone_buffer.ptr()), bone_buffer_size));
+		pb.vertex_buffers.push_back(buffers[3]);
+	} else {
+		bone.stride = 0;
+		buffers.write[3] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_BONES);
+	}
+
+	// Weights.
+	RD::VertexAttribute &weight = descriptions.write[4];
+	weight.format = RD::DATA_FORMAT_R16G16B16A16_UNORM;
+	weight.offset = 0;
+	weight.location = RS::ARRAY_WEIGHTS;
+	if (uses_bones) {
+		weight.stride = sizeof(uint16_t) * 4;
+		j = 0;
+
+		const float *weight_ptr = p_weights.ptr();
+		for (uint32_t i = 0; i < vertex_count; i++) {
+			weight_buffer[j++] = CLAMP(weight_ptr[i * 4 + 0] * 65535, 0, 65535);
+			weight_buffer[j++] = CLAMP(weight_ptr[i * 4 + 1] * 65535, 0, 65535);
+			weight_buffer[j++] = CLAMP(weight_ptr[i * 4 + 2] * 65535, 0, 65535);
+			weight_buffer[j++] = CLAMP(weight_ptr[i * 4 + 3] * 65535, 0, 65535);
+		}
+
+		uint32_t weight_buffer_size = weight_buffer.size() * sizeof(uint16_t);
+		buffers.write[4] = RD::get_singleton()->vertex_buffer_create(weight_buffer_size, Span((const uint8_t *)(weight_buffer.ptr()), weight_buffer_size));
+		pb.vertex_buffers.push_back(buffers[4]);
+	} else {
+		bone.stride = 0;
+		buffers.write[4] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_WEIGHTS);
 	}
 
 	RD::VertexFormatID vertex_id = RD::get_singleton()->vertex_format_create(descriptions);
 	ERR_FAIL_COND_V(vertex_id == RD::INVALID_ID, 0);
 
-	PolygonBuffers pb;
-	pb.vertex_buffer = RD::get_singleton()->vertex_buffer_create(polygon_buffer.size(), polygon_buffer);
-	for (int i = 0; i < descriptions.size(); i++) {
-		if (buffers[i] == RID()) { //if put in vertex, use as vertex
-			buffers.write[i] = pb.vertex_buffer;
-		}
-	}
-
+	pb.vertex_format_id = vertex_id;
 	pb.vertex_array = RD::get_singleton()->vertex_array_create(p_points.size(), vertex_id, buffers);
 	pb.primitive_count = vertex_count;
 
-	if (p_indices.size()) {
-		//create indices, as indices were requested
-		Vector<uint8_t> index_buffer;
+	// Indices.
+	if (!p_indices.is_empty()) {
+		thread_local LocalVector<uint8_t> index_buffer;
 		index_buffer.resize(p_count * sizeof(int32_t));
-		{
-			uint8_t *w = index_buffer.ptrw();
-			memcpy(w, p_indices.ptr(), sizeof(int32_t) * p_indices.size());
-		}
+		memcpy(index_buffer.ptr(), p_indices.ptr(), sizeof(int32_t) * p_indices.size());
+
 		pb.index_buffer = RD::get_singleton()->index_buffer_create(p_count, RD::INDEX_BUFFER_FORMAT_UINT32, index_buffer);
 		pb.indices = RD::get_singleton()->index_array_create(pb.index_buffer, 0, p_count);
 		pb.primitive_count = p_count;
 	}
 
-	pb.vertex_format_id = vertex_id;
-
 	PolygonID id = polygon_buffers.last_id++;
-
 	polygon_buffers.polygons[id] = pb;
-
 	return id;
 }
 
@@ -345,7 +298,10 @@ void RendererCanvasRenderRD::free_polygon(PolygonID p_polygon) {
 	}
 
 	RD::get_singleton()->free_rid(pb.vertex_array);
-	RD::get_singleton()->free_rid(pb.vertex_buffer);
+
+	for (RID vertex_buffer : pb.vertex_buffers) {
+		RD::get_singleton()->free_rid(vertex_buffer);
+	}
 
 	polygon_buffers.polygons.erase(p_polygon);
 }

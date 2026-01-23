@@ -233,7 +233,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 	struct PolygonBuffers {
 		RD::VertexFormatID vertex_format_id;
-		RID vertex_buffer;
+		Vector<RID> vertex_buffers;
 		RID vertex_array;
 		RID index_buffer;
 		RID indices;
