@@ -470,7 +470,7 @@ RID RendererCanvasRenderRD::_create_base_uniform_set(RID p_to_render_target, boo
 }
 
 RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance, void *p_surface, uint32_t p_surface_index, RID *r_vertex_array) {
-	const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes ? 1 : 2;
+	const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes || (r_pipeline_key.vertex_format_id == RD::INVALID_FORMAT_ID) ? 1 : 2;
 	while (r_pipeline_key.ubershader < ubershader_iterations) {
 		if (r_pipeline_key.ubershader) {
 			r_pipeline_key.variant = SHADER_VARIANT_UBERSHADER;
