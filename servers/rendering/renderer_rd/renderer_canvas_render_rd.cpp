@@ -3260,6 +3260,9 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 				pipeline_key.variant = primitive == RS::PRIMITIVE_POINTS ? SHADER_VARIANT_ATTRIBUTES_POINTS : SHADER_VARIANT_ATTRIBUTES;
 				pipeline_key.render_primitive = _primitive_type_to_render_primitive(primitive);
 				pipeline_key.vertex_format_id = RD::INVALID_FORMAT_ID;
+				pipeline_key.shader_specialization.use_ninepatch = 0;
+				pipeline_key.shader_specialization.use_attributes = 1;
+				pipeline_key.shader_specialization.use_primitive = 0;
 
 				pipeline = _get_pipeline_specialization_or_ubershader(p_shader_data, pipeline_key, push_constant.base, mesh_instance, surface, j, &vertex_array);
 				RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, pipeline);
