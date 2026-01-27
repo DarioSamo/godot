@@ -101,6 +101,97 @@ void RendererCanvasRenderRD::_update_transform_to_mat4(const Transform3D &p_tran
 	p_mat4[15] = 1;
 }
 
+void RendererCanvasRenderRD::_fill_vertex_general_attributes(uint32_t p_binding, uint32_t p_stride, Vector<RD::VertexAttribute> &r_attributes) {
+	uint32_t offset = 0;
+	RD::VertexAttribute &attrib_a = r_attributes.write[0];
+	attrib_a.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+	attrib_a.stride = p_stride;
+	attrib_a.frequency = RD::VERTEX_FREQUENCY_INSTANCE;
+	attrib_a.location = 1;
+	attrib_a.binding = p_binding;
+	attrib_a.offset = offset;
+	offset += sizeof(float) * 4;
+
+	RD::VertexAttribute &attrib_b = r_attributes.write[1];
+	attrib_b = attrib_a;
+	attrib_b.location = 2;
+	attrib_b.offset = offset;
+	offset += sizeof(float) * 4;
+
+	RD::VertexAttribute &attrib_c = r_attributes.write[2];
+	attrib_c = attrib_a;
+	attrib_c.location = 5;
+	attrib_c.offset = offset;
+	offset += sizeof(float) * 4;
+
+	RD::VertexAttribute &attrib_d = r_attributes.write[3];
+	attrib_d = attrib_a;
+	attrib_d.location = 8;
+	attrib_d.offset = offset;
+	offset += sizeof(float) * 4;
+
+	RD::VertexAttribute &attrib_e = r_attributes.write[4];
+	attrib_e = attrib_a;
+	attrib_e.location = 9;
+	attrib_e.offset = offset;
+	offset += sizeof(float) * 4;
+
+	// We explicitly don't increase the offset, as attrib_G should read the same data but reinterpreted as UINT.
+	RD::VertexAttribute &attrib_f = r_attributes.write[5];
+	attrib_f = attrib_a;
+	attrib_f.location = 12;
+	attrib_f.offset = offset;
+
+	RD::VertexAttribute &attrib_g = r_attributes.write[6];
+	attrib_g = attrib_a;
+	attrib_g.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
+	attrib_g.location = 13;
+	attrib_g.offset = offset;
+	offset += sizeof(uint32_t) * 4;
+
+	RD::VertexAttribute &attrib_h = r_attributes.write[7];
+	attrib_h = attrib_g;
+	attrib_h.location = 14;
+	attrib_h.offset = offset;
+	offset += sizeof(uint32_t) * 4;
+
+	RD::VertexAttribute &attrib_i = r_attributes.write[8];
+	attrib_i = attrib_g;
+	attrib_i.location = 15;
+	attrib_i.offset = offset;
+	offset += sizeof(uint32_t) * 4;
+}
+
+void RendererCanvasRenderRD::_fill_vertex_polygon_attributes(uint32_t p_base_index, Vector<RD::VertexAttribute> &r_attributes) {
+	RD::VertexAttribute &position = r_attributes.write[p_base_index + 0];
+	position.binding = 0;
+	position.offset = 0;
+	position.stride = sizeof(InstanceData);
+	position.frequency = RD::VERTEX_FREQUENCY_INSTANCE;
+	position.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+	position.location = RS::ARRAY_VERTEX;
+
+	RD::VertexAttribute &color = r_attributes.write[p_base_index + 1];
+	color = position;
+	color.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+	color.location = RS::ARRAY_COLOR;
+
+	RD::VertexAttribute &uv = r_attributes.write[p_base_index + 2];
+	color = position;
+	uv.format = RD::DATA_FORMAT_R32G32_SFLOAT;
+	uv.location = RS::ARRAY_TEX_UV;
+
+	RD::VertexAttribute &bones = r_attributes.write[p_base_index + 3];
+	color = position;
+	bones.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
+	bones.location = RS::ARRAY_BONES;
+
+	RD::VertexAttribute &weights = r_attributes.write[p_base_index + 4];
+	color = position;
+	weights.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+	weights.location = RS::ARRAY_WEIGHTS;
+}
+
 RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Vector<int> &p_indices, const Vector<Point2> &p_points, const Vector<Color> &p_colors, const Vector<Point2> &p_uvs, const Vector<int> &p_bones, const Vector<float> &p_weights, int p_count) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 	uint32_t vertex_count = p_points.size();
@@ -132,15 +223,21 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 	PolygonBuffers pb;
 	thread_local Vector<RD::VertexAttribute> descriptions;
 	thread_local Vector<RID> buffers;
-	descriptions.resize(5);
-	buffers.resize(5);
+	descriptions.resize(14);
+	buffers.resize(6);
+
+	_fill_vertex_general_attributes(0, sizeof(InstanceData), descriptions);
+	buffers.write[0] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_ATTRIBUTES);
 
 	// Positions.
-	RD::VertexAttribute &position = descriptions.write[0];
+	const uint32_t base_attribute_index = 9;
+	const uint32_t base_binding = 1;
+	RD::VertexAttribute &position = descriptions.write[base_attribute_index];
 	position.format = RD::DATA_FORMAT_R32G32_SFLOAT;
 	position.offset = 0;
 	position.location = RS::ARRAY_VERTEX;
 	position.stride = sizeof(float) * 2;
+	position.binding = base_binding + 0;
 
 	const Vector2 *points_ptr = p_points.ptr();
 	uint32_t j = 0;
@@ -150,14 +247,16 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 	}
 
 	uint32_t position_buffer_size = position_buffer.size() * sizeof(float);
-	buffers.write[0] = RD::get_singleton()->vertex_buffer_create(position_buffer_size, Span((const uint8_t *)(position_buffer.ptr()), position_buffer_size));
-	pb.vertex_buffers.push_back(buffers[0]);
+	buffers.write[position.binding] = RD::get_singleton()->vertex_buffer_create(position_buffer_size, Span((const uint8_t *)(position_buffer.ptr()), position_buffer_size));
+	pb.vertex_buffers.push_back(buffers[position.binding]);
 
 	// Colors.
-	RD::VertexAttribute &color = descriptions.write[1];
+	RD::VertexAttribute &color = descriptions.write[base_attribute_index + 1];
 	color.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
 	color.offset = 0;
 	color.location = RS::ARRAY_COLOR;
+	color.binding = base_binding + 1;
+
 	if (uses_color) {
 		color.stride = sizeof(float) * 4;
 		j = 0;
@@ -181,18 +280,20 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 		}
 
 		uint32_t color_buffer_size = color_buffer.size() * sizeof(float);
-		buffers.write[1] = RD::get_singleton()->vertex_buffer_create(color_buffer_size, Span((const uint8_t *)(color_buffer.ptr()), color_buffer_size));
-		pb.vertex_buffers.push_back(buffers[1]);
+		buffers.write[color.binding] = RD::get_singleton()->vertex_buffer_create(color_buffer_size, Span((const uint8_t *)(color_buffer.ptr()), color_buffer_size));
+		pb.vertex_buffers.push_back(buffers[color.binding]);
 	} else {
 		color.stride = 0;
-		buffers.write[1] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_COLOR);
+		buffers.write[color.binding] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_COLOR);
 	}
 
 	// UVs.
-	RD::VertexAttribute &uv = descriptions.write[2];
+	RD::VertexAttribute &uv = descriptions.write[base_attribute_index + 2];
 	uv.format = RD::DATA_FORMAT_R32G32_SFLOAT;
 	uv.offset = 0;
 	uv.location = RS::ARRAY_TEX_UV;
+	uv.binding = base_binding + 2;
+
 	if (uses_uv) {
 		uv.stride = sizeof(float) * 2;
 		j = 0;
@@ -204,18 +305,20 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 		}
 
 		uint32_t uv_buffer_size = uv_buffer.size() * sizeof(float);
-		buffers.write[2] = RD::get_singleton()->vertex_buffer_create(uv_buffer_size, Span((const uint8_t *)(uv_buffer.ptr()), uv_buffer_size));
-		pb.vertex_buffers.push_back(buffers[2]);
+		buffers.write[uv.binding] = RD::get_singleton()->vertex_buffer_create(uv_buffer_size, Span((const uint8_t *)(uv_buffer.ptr()), uv_buffer_size));
+		pb.vertex_buffers.push_back(buffers[uv.binding]);
 	} else {
 		uv.stride = 0;
-		buffers.write[2] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_TEX_UV);
+		buffers.write[uv.binding] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_TEX_UV);
 	}
 
 	// Bones.
-	RD::VertexAttribute &bone = descriptions.write[3];
+	RD::VertexAttribute &bone = descriptions.write[base_attribute_index + 3];
 	bone.format = RD::DATA_FORMAT_R16G16B16A16_UINT;
 	bone.offset = 0;
 	bone.location = RS::ARRAY_BONES;
+	bone.binding = base_binding + 3;
+
 	if (uses_bones) {
 		bone.stride = sizeof(uint16_t) * 4;
 		j = 0;
@@ -229,18 +332,20 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 		}
 
 		uint32_t bone_buffer_size = bone_buffer.size() * sizeof(uint16_t);
-		buffers.write[3] = RD::get_singleton()->vertex_buffer_create(bone_buffer_size, Span((const uint8_t *)(bone_buffer.ptr()), bone_buffer_size));
-		pb.vertex_buffers.push_back(buffers[3]);
+		buffers.write[bone.binding] = RD::get_singleton()->vertex_buffer_create(bone_buffer_size, Span((const uint8_t *)(bone_buffer.ptr()), bone_buffer_size));
+		pb.vertex_buffers.push_back(buffers[bone.binding]);
 	} else {
 		bone.stride = 0;
-		buffers.write[3] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_BONES);
+		buffers.write[bone.binding] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_BONES);
 	}
 
 	// Weights.
-	RD::VertexAttribute &weight = descriptions.write[4];
+	RD::VertexAttribute &weight = descriptions.write[base_attribute_index + 4];
 	weight.format = RD::DATA_FORMAT_R16G16B16A16_UNORM;
 	weight.offset = 0;
 	weight.location = RS::ARRAY_WEIGHTS;
+	weight.binding = base_binding + 4;
+
 	if (uses_bones) {
 		weight.stride = sizeof(uint16_t) * 4;
 		j = 0;
@@ -254,11 +359,11 @@ RendererCanvasRender::PolygonID RendererCanvasRenderRD::request_polygon(const Ve
 		}
 
 		uint32_t weight_buffer_size = weight_buffer.size() * sizeof(uint16_t);
-		buffers.write[4] = RD::get_singleton()->vertex_buffer_create(weight_buffer_size, Span((const uint8_t *)(weight_buffer.ptr()), weight_buffer_size));
-		pb.vertex_buffers.push_back(buffers[4]);
+		buffers.write[weight.binding] = RD::get_singleton()->vertex_buffer_create(weight_buffer_size, Span((const uint8_t *)(weight_buffer.ptr()), weight_buffer_size));
+		pb.vertex_buffers.push_back(buffers[weight.binding]);
 	} else {
 		bone.stride = 0;
-		buffers.write[4] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_WEIGHTS);
+		buffers.write[weight.binding] = mesh_storage->mesh_get_default_rd_buffer(RendererRD::MeshStorage::DEFAULT_RD_BUFFER_WEIGHTS);
 	}
 
 	RD::VertexFormatID vertex_id = RD::get_singleton()->vertex_format_create(descriptions);
@@ -426,7 +531,10 @@ RID RendererCanvasRenderRD::_create_base_uniform_set(RID p_to_render_target, boo
 }
 
 RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance, void *p_surface, uint32_t p_surface_index, RID *r_vertex_array) {
-	const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes || (r_pipeline_key.vertex_format_id == RD::INVALID_FORMAT_ID) ? 1 : 2;
+	r_pipeline_key.ubershader = 1;
+	const uint32_t ubershader_iterations = 2;
+
+	//const uint32_t ubershader_iterations = r_pipeline_key.shader_specialization.use_attributes || (r_pipeline_key.vertex_format_id == RD::INVALID_FORMAT_ID) ? 1 : 2;
 	while (r_pipeline_key.ubershader < ubershader_iterations) {
 		if (r_pipeline_key.ubershader) {
 			r_pipeline_key.variant = SHADER_VARIANT_UBERSHADER;
@@ -1948,87 +2056,12 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 	}
 
 	{
-		Vector<RD::VertexAttribute> vf;
-		uint32_t offset = 0;
-		RD::VertexAttribute vd;
-		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-		vd.stride = sizeof(InstanceData);
-		vd.frequency = RD::VERTEX_FREQUENCY_INSTANCE;
-		vd.location = 1;
-		vd.binding = 0; // Explicitly assign binding 0 for instance data.
-		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_A
+		Vector<RD::VertexAttribute> attributes;
+		attributes.resize(14);
+		_fill_vertex_general_attributes(0, sizeof(InstanceData), attributes);
+		_fill_vertex_polygon_attributes(9, attributes);
 
-		vd.location = 2;
-		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_B
-
-		vd.location = 5;
-		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_C
-
-		vd.location = 8;
-		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_D
-
-		vd.location = 9;
-		vd.offset = offset;
-		offset += sizeof(float) * 4;
-		vf.push_back(vd); // attrib_E
-
-		// We explicitly don't increase the offset, as attrib_G should read the same data but reinterpreted as UINT.
-		vd.location = 12;
-		vd.offset = offset;
-		vf.push_back(vd); // attrib_F
-
-		vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
-		vd.location = 13;
-		vd.offset = offset;
-		offset += sizeof(uint32_t) * 4;
-		vf.push_back(vd); // attrib_G
-
-		vd.location = 14;
-		vd.offset = offset;
-		offset += sizeof(uint32_t) * 4;
-		vf.push_back(vd); // attrib_H
-
-		vd.location = 15;
-		vd.offset = offset;
-		offset += sizeof(uint32_t) * 4;
-		vf.push_back(vd); // attrib_I
-
-		/// BIND POLYGON ELEMENTS TO NULL OFFSET AND STRIDE
-		vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
-		vd.offset = 0;
-		vd.location = RS::ARRAY_VERTEX;
-		vf.push_back(vd); // vertex_attrib
-
-		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-		vd.offset = 0;
-		vd.location = RS::ARRAY_COLOR;
-		vf.push_back(vd); // color_attrib
-
-		vd.format = RD::DATA_FORMAT_R32G32_SFLOAT;
-		vd.offset = 0;
-		vd.location = RS::ARRAY_TEX_UV;
-		vf.push_back(vd); // uv_attrib
-
-		vd.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
-		vd.offset = 0;
-		vd.location = RS::ARRAY_BONES;
-		vf.push_back(vd); // bone_attrib
-
-		vd.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
-		vd.offset = 0;
-		vd.location = RS::ARRAY_WEIGHTS;
-		vf.push_back(vd); // weight_attrib
-		///
-
-		shader.vertex_format_id = RD::get_singleton()->vertex_format_create(vf);
+		shader.vertex_format_id = RD::get_singleton()->vertex_format_create(attributes);
 	}
 
 	// Compile the ubershader pipeline for the default shader as soon as the vertex format is created.

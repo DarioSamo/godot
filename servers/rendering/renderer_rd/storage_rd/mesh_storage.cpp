@@ -155,6 +155,19 @@ MeshStorage::MeshStorage() {
 			}
 			mesh_default_rd_buffers[DEFAULT_RD_BUFFER_WEIGHTS] = RD::get_singleton()->vertex_buffer_create(buffer.size(), buffer);
 		}
+
+		{ //weights
+			buffer.resize(sizeof(float) * 4);
+			{
+				uint8_t *w = buffer.ptrw();
+				float *fptr = reinterpret_cast<float *>(w);
+				fptr[0] = 0.0;
+				fptr[1] = 0.0;
+				fptr[2] = 0.0;
+				fptr[3] = 0.0;
+			}
+			mesh_default_rd_buffers[DEFAULT_RD_BUFFER_ATTRIBUTES] = RD::get_singleton()->vertex_buffer_create(buffer.size(), buffer);
+		}
 	}
 
 	{
